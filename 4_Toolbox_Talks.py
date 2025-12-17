@@ -3,11 +3,9 @@ from pathlib import Path
 
 st.set_page_config(page_title="Toolbox Talks", layout="wide")
 st.title("Toolbox Talks Library")
-
 st.write("Download the latest toolbox talks below:")
 
 talks_dir = Path("assets/toolbox_talks")
-
 pdf_files = sorted(talks_dir.glob("*.pdf"))
 
 if not pdf_files:

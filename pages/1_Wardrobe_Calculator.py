@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+import os
 
 st.set_page_config(page_title="Wardrobe Calculator", layout="wide")
 st.title("Wardrobe Door & Liner Calculator")
@@ -50,7 +51,7 @@ def draw_wardrobe_diagram(
     opening_width_mm = max(opening_width_mm, 1)
     opening_height_mm = max(opening_height_mm, 1)
     num_doors = max(int(num_doors), 1)
-    side_thk_mm = max(side_thk_mm, 0)
+    side_thk_mm = max(float(side_thk_mm), 0)
 
     side_rel = side_thk_mm / opening_width_mm
     bottom_rel = bottom_thk_mm / opening_height_mm
@@ -91,7 +92,7 @@ def draw_wardrobe_diagram(
         )
 
     # Doors (dashed)
-    door_width_mm = max(door_width_mm, 0)
+    door_width_mm = max(float(door_width_mm), 0)
     door_width_rel = door_width_mm / opening_width_mm if opening_width_mm > 0 else 0
 
     total_doors_span = num_doors * door_width_rel
@@ -101,7 +102,16 @@ def draw_wardrobe_diagram(
 
     x_start = side_rel
     for _ in range(num_doors):
-        ax.add_patch(Rectangle((x_start, bottom_rel), door_width_rel, door_h_rel, fill=False, linestyle="--", linewidth=1))
+        ax.add_patch(
+            Rectangle(
+                (x_start, bottom_rel),
+                door_width_rel,
+                door_h_rel,
+                fill=False,
+                linestyle="--",
+                linewidth=1,
+            )
+        )
         x_start += door_width_rel
 
     # Side liner fixing note (NO ARROW)
@@ -194,23 +204,25 @@ def calculate_for_row(row: pd.Series) -> pd.Series:
 
         issue_flag = "✅ OK" if height_status == "OK" else "🔴 Check height"
 
-        return pd.Series({
-            "Door_Height_mm": int(round(door_height)),
-            "Door_Width_mm": int(round(door_width)),
-            "Doors_Used": int(doors),
-            "Dropdown_Height_mm": int(round(dropdown_h)),
-            "Side_Liner_Thickness_mm": round(side_thk, 1),
-            "Required_Buildout_Per_Side_mm": round(build_out_per_side, 1),
-            "Net_Width_mm": int(round(net_width)),
-            "Door_Span_mm": int(round(door_span)),
-            "Overlap_Tolerance_mm": int(round(tol)),
-            "Span_Diff_mm": round(span_diff, 1),
-            "Bottom_Liner_Length_mm": int(round(net_width)),
-            "Side_Liner_Length_mm": int(round(height)),
-            "Dropdown_Length_mm": int(round(net_width)),
-            "Height_Status": height_status,
-            "Issue": issue_flag,
-        })
+        return pd.Series(
+            {
+                "Door_Height_mm": int(round(door_height)),
+                "Door_Width_mm": int(round(door_width)),
+                "Doors_Used": int(doors),
+                "Dropdown_Height_mm": int(round(dropdown_h)),
+                "Side_Liner_Thickness_mm": round(side_thk, 1),
+                "Required_Buildout_Per_Side_mm": round(build_out_per_side, 1),
+                "Net_Width_mm": int(round(net_width)),
+                "Door_Span_mm": int(round(door_span)),
+                "Overlap_Tolerance_mm": int(round(tol)),
+                "Span_Diff_mm": round(span_diff, 1),
+                "Bottom_Liner_Length_mm": int(round(net_width)),
+                "Side_Liner_Length_mm": int(round(height)),
+                "Dropdown_Length_mm": int(round(net_width)),
+                "Height_Status": height_status,
+                "Issue": issue_flag,
+            }
+        )
 
     # Custom mode
     net_width = width - 2 * SIDE_LINER_THICKNESS
@@ -240,38 +252,44 @@ def calculate_for_row(row: pd.Series) -> pd.Series:
 
     issue_flag = "✅ OK" if height_status == "OK" else "🔴 Check height"
 
-    return pd.Series({
-        "Door_Height_mm": int(round(final_door_h)),
-        "Door_Width_mm": int(round(door_width)),
-        "Doors_Used": int(doors),
-        "Dropdown_Height_mm": int(round(dropdown_h)),
-        "Side_Liner_Thickness_mm": float(SIDE_LINER_THICKNESS),
-        "Required_Buildout_Per_Side_mm": 0.0,
-        "Net_Width_mm": int(round(net_width)),
-        "Door_Span_mm": int(round(door_span)),
-        "Overlap_Tolerance_mm": int(round(total_overlap)),
-        "Span_Diff_mm": 0.0,
-        "Bottom_Liner_Length_mm": int(round(net_width)),
-        "Side_Liner_Length_mm": int(round(height)),
-        "Dropdown_Length_mm": int(round(net_width)),
-        "Height_Status": height_status,
-        "Issue": issue_flag,
-    })
+    return pd.Series(
+        {
+            "Door_Height_mm": int(round(final_door_h)),
+            "Door_Width_mm": int(round(door_width)),
+            "Doors_Used": int(doors),
+            "Dropdown_Height_mm": int(round(dropdown_h)),
+            "Side_Liner_Thickness_mm": float(SIDE_LINER_THICKNESS),
+            "Required_Buildout_Per_Side_mm": 0.0,
+            "Net_Width_mm": int(round(net_width)),
+            "Door_Span_mm": int(round(door_span)),
+            "Overlap_Tolerance_mm": int(round(total_overlap)),
+            "Span_Diff_mm": 0.0,
+            "Bottom_Liner_Length_mm": int(round(net_width)),
+            "Side_Liner_Length_mm": int(round(height)),
+            "Dropdown_Length_mm": int(round(net_width)),
+            "Height_Status": height_status,
+            "Issue": issue_flag,
+        }
+    )
 
 
 # ============================================================
 # DEFAULT DATA
 # ============================================================
-DEFAULT_DATA = pd.DataFrame([{
-    "Job": "Job 1",
-    "Opening": "Wardrobe A",
-    "Width_mm": 2200,
-    "Height_mm": 2600,
-    "Doors": 3,
-    "Door_System": "Custom (calculated panels)",
-    "Top_Liner_Option": "108mm Dropdown",
-    "Fixed_Door_Width_mm": 762,
-}])
+DEFAULT_DATA = pd.DataFrame(
+    [
+        {
+            "Job": "Job 1",
+            "Opening": "Wardrobe A",
+            "Width_mm": 2200,
+            "Height_mm": 2600,
+            "Doors": 3,
+            "Door_System": "Custom (calculated panels)",
+            "Top_Liner_Option": "108mm Dropdown",
+            "Fixed_Door_Width_mm": 762,
+        }
+    ]
+)
 
 if "openings_df" not in st.session_state:
     st.session_state["openings_df"] = DEFAULT_DATA.copy()
@@ -304,13 +322,10 @@ edited_df = st.data_editor(
 
 st.session_state["openings_df"] = edited_df
 
-st.subheader("2. Calculated results")
-
+# --- Calculate once (but DO NOT show the big calculated table section) ---
 if len(edited_df) > 0:
     calcs = edited_df.apply(calculate_for_row, axis=1)
     results_df = pd.concat([edited_df.reset_index(drop=True), calcs], axis=1)
-
-    st.dataframe(results_df, use_container_width=True)
 
     if (results_df["Height_Status"] != "OK").any():
         st.warning("Some openings need checking. Review Height Status / Dropdown values.")
@@ -323,7 +338,7 @@ if len(edited_df) > 0:
         st.markdown("#### Openings to check")
         st.dataframe(problem_rows, use_container_width=True)
 
-    st.subheader("3. Visualise an opening")
+    st.subheader("2. Visualise an opening")
 
     options = [
         f"{i}: {row['Job']} – {row['Opening']} ({row['Issue']}, {row['Door_System']})"
@@ -351,22 +366,41 @@ if len(edited_df) > 0:
 
         if row["Door_System"] == "Fixed 2223mm doors":
             st.markdown("**Fixed-size dropdown example**")
-            st.image("fixed_dropdown_example.jpg", use_column_width=True)
-            st.markdown(
-                """
-                <div style="
-                    border: 1px solid #ddd;
-                    padding: 8px 10px;
-                    border-radius: 4px;
-                    font-size: 0.9em;
-                    background-color: #f9f9f9;
-                    margin-top: 4px;
-                ">
-                    Example photo of a fixed-size door dropdown.
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+
+            image_paths = [
+                "fixed_dropdown_example.jpg",
+                "assets/product_info/fixed_dropdown_example.jpg.JPG",
+            ]
+
+            image_found = False
+            for path in image_paths:
+                if os.path.exists(path):
+                    st.image(path, use_container_width=True)
+                    image_found = True
+                    break
+
+            if image_found:
+                st.markdown(
+                    """
+                    <div style="
+                        border: 1px solid #ddd;
+                        padding: 8px 10px;
+                        border-radius: 4px;
+                        font-size: 0.9em;
+                        background-color: #f9f9f9;
+                        margin-top: 4px;
+                    ">
+                        Example photo of a fixed-size door dropdown.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info(
+                    "Dropdown example image not found. "
+                    "Checked: fixed_dropdown_example.jpg and "
+                    "assets/product_info/fixed_dropdown_example.jpg.JPG"
+                )
 
     with col2:
         st.markdown("#### Summary")

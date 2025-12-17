@@ -10,62 +10,55 @@ st.write(
 st.divider()
 
 # -----------------------------------
-# Aluminium doors
+# Aura Stanchions
 # -----------------------------------
-st.subheader("Aluminium Doors")
+st.subheader("Aura Stanchions")
 
 st.image(
-    "assets/product_info/aluminium_door.png",
-    caption="Aluminium sliding door system",
+    "assets/product_info/aura.jpg",
+    caption="Aura Stanchion System",
     use_column_width=True,
 )
 
 st.markdown(
     """
-- Lightweight aluminium frame  
-- Suitable for soft-close systems  
-- Available in multiple finishes  
 """
 )
 
 st.divider()
 
 # -----------------------------------
-# Steel doors
+# Door Types
 # -----------------------------------
-st.subheader("Steel Doors")
+st.subheader("Door Types")
 
 st.image(
-    "assets/product_info/steel_door.png",
-    caption="Steel framed sliding door",
+    "assets/product_info/Door Types.jpg",
+    caption="Our Types Of Doors",
     use_column_width=True,
 )
 
 st.markdown(
     """
-- Heavier-duty construction  
-- Requires correct soft-close specification  
-- Ensure track is level before install  
+
 """
 )
 
 st.divider()
 
 # -----------------------------------
-# Soft-close units
+#  Woodwork Colours
 # -----------------------------------
 st.subheader("Soft-Close Units")
 
 st.image(
-    "assets/product_info/soft_close_unit.jpg",
-    caption="Soft-close damper unit (example)",
+    "assets/product_info/Colours.jpg",
+    caption="Our Woodwork Colours",
     use_column_width=True,
 )
 
 st.markdown(
     """
-- Ensure correct handed unit is used  
-- Check door weight rating  
-- Test before final fix  
+
 """
 )

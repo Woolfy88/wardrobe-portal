@@ -1,31 +1,20 @@
 import streamlit as st
+from pathlib import Path
 
-st.set_page_config(page_title="Toolbox Talks", layout="wide")
-st.title("Toolbox Talks")
+st.title("Toolbox Talks Library")
 
-with st.expander("Manual handling"):
-    st.markdown(
-        """
-- Assess the load  
-- Two-person lifts for heavy doors/panels  
-- Bend knees, straight back  
-"""
-    )
+talks_dir = Path("assets/toolbox_talks")
 
-with st.expander("Working at height"):
-    st.markdown(
-        """
-- Use correct steps/platforms  
-- Keep area clear  
-- Follow site rules  
-"""
-    )
+pdf_files = sorted(talks_dir.glob("*.pdf"))
 
-with st.expander("Power tools & dust"):
-    st.markdown(
-        """
-- Check tools before use  
-- Use extraction / masks when cutting boards  
-- Keep cables tidy  
-"""
-    )
+if not pdf_files:
+    st.info("No toolbox talk PDFs found yet.")
+else:
+    for pdf_path in pdf_files:
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                label=f"Download: {pdf_path.stem.replace('_',' ')}",
+                data=f,
+                file_name=pdf_path.name,
+                mime="application/pdf",
+            )

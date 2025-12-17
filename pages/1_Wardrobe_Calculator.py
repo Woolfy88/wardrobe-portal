@@ -48,8 +48,8 @@ def draw_wardrobe_diagram(
     num_doors: int,
     door_width_mm: float,
 ):
-    opening_width_mm = max(opening_width_mm, 1)
-    opening_height_mm = max(opening_height_mm, 1)
+    opening_width_mm = max(float(opening_width_mm), 1)
+    opening_height_mm = max(float(opening_height_mm), 1)
     num_doors = max(int(num_doors), 1)
     side_thk_mm = max(float(side_thk_mm), 0)
 
@@ -168,16 +168,17 @@ def draw_wardrobe_diagram(
 # CALCULATION FUNCTION
 # ============================================================
 def calculate_for_row(row: pd.Series) -> pd.Series:
-    width = max(float(row["Width_mm"]), 1)
-    height = max(float(row["Height_mm"]), 1)
-    doors = max(int(row["Doors"]), 1)
+    # defensively handle blanks coming from the editor
+    width = max(float(row.get("Width_mm") or 1), 1)
+    height = max(float(row.get("Height_mm") or 1), 1)
+    doors = max(int(float(row.get("Doors") or 1)), 1)
 
     door_system = row.get("Door_System", DOOR_SYSTEM_OPTIONS[0])
 
     if door_system == "Fixed 2223mm doors":
         door_height = FIXED_DOOR_HEIGHT
 
-        door_width = float(row.get("Fixed_Door_Width_mm", 762))
+        door_width = float(row.get("Fixed_Door_Width_mm") or 762)
         if door_width not in FIXED_DOOR_WIDTH_OPTIONS:
             door_width = 762
 
@@ -227,7 +228,7 @@ def calculate_for_row(row: pd.Series) -> pd.Series:
     # Custom mode
     net_width = width - 2 * SIDE_LINER_THICKNESS
 
-    option = row.get("Top_Liner_Option", "108mm Dropdown")
+    option = row.get("Top_Liner_Option") or "108mm Dropdown"
     selected_dropdown = TOP_LINER_OPTIONS.get(option, 108)
     dropdown_h = min(selected_dropdown, MAX_DROPDOWN_LIMIT)
 
@@ -274,37 +275,39 @@ def calculate_for_row(row: pd.Series) -> pd.Series:
 
 
 # ============================================================
-# DEFAULT DATA
-# ============================================================
-DEFAULT_DATA = pd.DataFrame(
-    [
-        {
-            "Job": "Job 1",
-            "Opening": "Wardrobe A",
-            "Width_mm": 2200,
-            "Height_mm": 2600,
-            "Doors": 3,
-            "Door_System": "Custom (calculated panels)",
-            "Top_Liner_Option": "108mm Dropdown",
-            "Fixed_Door_Width_mm": 762,
-        }
-    ]
-)
-
-if "openings_df" not in st.session_state:
-    st.session_state["openings_df"] = DEFAULT_DATA.copy()
-
-# ============================================================
 # UI
 # ============================================================
 st.subheader("1. Enter openings")
 
+# Reset button (clears the data editor's stored value)
+if st.button("Reset table", type="secondary"):
+    # data_editor stores its value under the widget key
+    if "openings_table" in st.session_state:
+        del st.session_state["openings_table"]
+    st.rerun()
+
+# Start blank (but with the correct columns)
+blank_df = pd.DataFrame(
+    columns=[
+        "Job",
+        "Opening",
+        "Width_mm",
+        "Height_mm",
+        "Doors",
+        "Door_System",
+        "Top_Liner_Option",
+        "Fixed_Door_Width_mm",
+    ]
+)
+
 edited_df = st.data_editor(
-    st.session_state["openings_df"],
+    blank_df,
     num_rows="dynamic",
     use_container_width=True,
     key="openings_table",
     column_config={
+        "Job": st.column_config.TextColumn("Job"),
+        "Opening": st.column_config.TextColumn("Opening"),
         "Width_mm": st.column_config.NumberColumn("Width (mm)", min_value=300, step=10),
         "Height_mm": st.column_config.NumberColumn("Height (mm)", min_value=300, step=10),
         "Doors": st.column_config.NumberColumn("Number of doors", min_value=1, max_value=10, step=1),
@@ -320,105 +323,113 @@ edited_df = st.data_editor(
     },
 )
 
-st.session_state["openings_df"] = edited_df
+# --- Calculate once (no big calculated table) ---
+if edited_df is not None and len(edited_df) > 0:
+    # Drop completely empty rows (common when user adds a row but hasn't typed yet)
+    working_df = edited_df.copy().dropna(how="all")
 
-# --- Calculate once (but DO NOT show the big calculated table section) ---
-if len(edited_df) > 0:
-    calcs = edited_df.apply(calculate_for_row, axis=1)
-    results_df = pd.concat([edited_df.reset_index(drop=True), calcs], axis=1)
+    if len(working_df) == 0:
+        st.info("Add at least one opening to calculate sizes and view diagrams.")
+    else:
+        # Fill sensible defaults so partially-complete rows don't crash calc
+        working_df["Doors"] = working_df["Doors"].fillna(1)
+        working_df["Door_System"] = working_df["Door_System"].fillna(DOOR_SYSTEM_OPTIONS[0])
+        working_df["Top_Liner_Option"] = working_df["Top_Liner_Option"].fillna("108mm Dropdown")
+        working_df["Fixed_Door_Width_mm"] = working_df["Fixed_Door_Width_mm"].fillna(762)
+        working_df["Job"] = working_df["Job"].fillna("")
+        working_df["Opening"] = working_df["Opening"].fillna("")
 
-    if (results_df["Height_Status"] != "OK").any():
-        st.warning("Some openings need checking. Review Height Status / Dropdown values.")
+        calcs = working_df.apply(calculate_for_row, axis=1)
+        results_df = pd.concat([working_df.reset_index(drop=True), calcs], axis=1)
 
-    csv = results_df.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", csv, "wardrobe_results.csv", "text/csv")
+        if (results_df["Height_Status"] != "OK").any():
+            st.warning("Some openings need checking. Review Height Status / Dropdown values.")
 
-    problem_rows = results_df[results_df["Issue"] != "✅ OK"]
-    if not problem_rows.empty:
-        st.markdown("#### Openings to check")
-        st.dataframe(problem_rows, use_container_width=True)
+        csv = results_df.to_csv(index=False).encode("utf-8")
+        st.download_button("Download CSV", csv, "wardrobe_results.csv", "text/csv")
 
-    st.subheader("2. Visualise an opening")
+        problem_rows = results_df[results_df["Issue"] != "✅ OK"]
+        if not problem_rows.empty:
+            st.markdown("#### Openings to check")
+            st.dataframe(problem_rows, use_container_width=True)
 
-    options = [
-        f"{i}: {row['Job']} – {row['Opening']} ({row['Issue']}, {row['Door_System']})"
-        for i, row in results_df.iterrows()
-    ]
-    selection = st.selectbox("Choose opening", options)
-    idx = int(selection.split(":")[0])
-    row = results_df.iloc[idx]
+        st.subheader("2. Visualise an opening")
 
-    fig = draw_wardrobe_diagram(
-        opening_width_mm=row["Width_mm"],
-        opening_height_mm=row["Height_mm"],
-        bottom_thk_mm=BOTTOM_LINER_THICKNESS,
-        side_thk_mm=row["Side_Liner_Thickness_mm"],
-        dropdown_height_mm=row["Dropdown_Height_mm"],
-        door_height_mm=row["Door_Height_mm"],
-        num_doors=row["Doors_Used"],
-        door_width_mm=row["Door_Width_mm"],
-    )
+        options = [
+            f"{i}: {row.get('Job','')} – {row.get('Opening','')} ({row['Issue']}, {row['Door_System']})"
+            for i, row in results_df.iterrows()
+        ]
+        selection = st.selectbox("Choose opening", options)
+        idx = int(selection.split(":")[0])
+        row = results_df.iloc[idx]
 
-    col1, col2 = st.columns([2, 1])
+        fig = draw_wardrobe_diagram(
+            opening_width_mm=row["Width_mm"],
+            opening_height_mm=row["Height_mm"],
+            bottom_thk_mm=BOTTOM_LINER_THICKNESS,
+            side_thk_mm=row["Side_Liner_Thickness_mm"],
+            dropdown_height_mm=row["Dropdown_Height_mm"],
+            door_height_mm=row["Door_Height_mm"],
+            num_doors=row["Doors_Used"],
+            door_width_mm=row["Door_Width_mm"],
+        )
 
-    with col1:
-        st.pyplot(fig)
+        col1, col2 = st.columns([2, 1])
 
-        if row["Door_System"] == "Fixed 2223mm doors":
-            st.markdown("**Fixed-size dropdown example**")
+        with col1:
+            st.pyplot(fig)
 
-            image_paths = [
-                "fixed_dropdown_example.jpg",
-                "assets/product_info/fixed_dropdown_example.jpg.JPG",
-            ]
+            if row["Door_System"] == "Fixed 2223mm doors":
+                st.markdown("**Fixed-size dropdown example**")
 
-            image_found = False
-            for path in image_paths:
-                if os.path.exists(path):
-                    st.image(path, use_container_width=True)
-                    image_found = True
-                    break
+                image_paths = [
+                    "fixed_dropdown_example.jpg",
+                    "assets/product_info/fixed_dropdown_example.jpg.JPG",
+                ]
 
-            if image_found:
-                st.markdown(
-                    """
-                    <div style="
-                        border: 1px solid #ddd;
-                        padding: 8px 10px;
-                        border-radius: 4px;
-                        font-size: 0.9em;
-                        background-color: #f9f9f9;
-                        margin-top: 4px;
-                    ">
-                        Example photo of a fixed-size door dropdown.
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.info(
-                    "Dropdown example image not found. "
-                    "Checked: fixed_dropdown_example.jpg and "
-                    "assets/product_info/fixed_dropdown_example.jpg.JPG"
-                )
+                for path in image_paths:
+                    if os.path.exists(path):
+                        st.image(path, use_container_width=True)
+                        st.markdown(
+                            """
+                            <div style="
+                                border: 1px solid #ddd;
+                                padding: 8px 10px;
+                                border-radius: 4px;
+                                font-size: 0.9em;
+                                background-color: #f9f9f9;
+                                margin-top: 4px;
+                            ">
+                                Example photo of a fixed-size door dropdown.
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        break
+                else:
+                    st.info(
+                        "Dropdown example image not found. "
+                        "Checked: fixed_dropdown_example.jpg and "
+                        "assets/product_info/fixed_dropdown_example.jpg.JPG"
+                    )
 
-    with col2:
-        st.markdown("#### Summary")
-        st.write(f"**Door system:** {row['Door_System']}")
-        st.write(f"**Issue:** {row['Issue']}")
-        st.write(f"**Height status:** {row['Height_Status']}")
-        st.write("---")
-        st.write(f"**Doors:** {int(row['Doors_Used'])}")
-        st.write(f"**Door height:** {int(row['Door_Height_mm'])} mm")
-        st.write(f"**Door width (each):** {int(row['Door_Width_mm'])} mm")
-        st.write(f"**Door span:** {int(row['Door_Span_mm'])} mm")
-        st.write(f"**Net width:** {int(row['Net_Width_mm'])} mm")
-        st.write(f"**Side liner thickness (each):** {row['Side_Liner_Thickness_mm']} mm")
-        st.write(f"**Build-out per side:** {row['Required_Buildout_Per_Side_mm']} mm")
-        st.write(f"**Overlap / tolerance:** {int(row['Overlap_Tolerance_mm'])} mm")
-        if row["Door_System"] == "Fixed 2223mm doors":
-            st.write(f"**Span difference:** {row['Span_Diff_mm']} mm")
-        st.write(f"**Dropdown height:** {int(row['Dropdown_Height_mm'])} mm")
+        with col2:
+            st.markdown("#### Summary")
+            st.write(f"**Door system:** {row['Door_System']}")
+            st.write(f"**Issue:** {row['Issue']}")
+            st.write(f"**Height status:** {row['Height_Status']}")
+            st.write("---")
+            st.write(f"**Doors:** {int(row['Doors_Used'])}")
+            st.write(f"**Door height:** {int(row['Door_Height_mm'])} mm")
+            st.write(f"**Door width (each):** {int(row['Door_Width_mm'])} mm")
+            st.write(f"**Door span:** {int(row['Door_Span_mm'])} mm")
+            st.write(f"**Net width:** {int(row['Net_Width_mm'])} mm")
+            st.write(f"**Side liner thickness (each):** {row['Side_Liner_Thickness_mm']} mm")
+            st.write(f"**Build-out per side:** {row['Required_Buildout_Per_Side_mm']} mm")
+            st.write(f"**Overlap / tolerance:** {int(row['Overlap_Tolerance_mm'])} mm")
+            if row["Door_System"] == "Fixed 2223mm doors":
+                st.write(f"**Span difference:** {row['Span_Diff_mm']} mm")
+            st.write(f"**Dropdown height:** {int(row['Dropdown_Height_mm'])} mm")
 
 else:
     st.info("Add at least one opening to calculate sizes and view diagrams.")

@@ -4,24 +4,32 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
 # ============================================================
-# PAGE-LEVEL PIN (optional) - uncomment if you want it enabled
+# SETTINGS
 # ============================================================
-# CALCULATOR_PIN = "1966"
-# if "calc_authenticated" not in st.session_state:
-#     st.session_state.calc_authenticated = False
-# if not st.session_state.calc_authenticated:
-#     st.set_page_config(page_title="Wardrobe Calculator – Access Required", layout="centered")
-#     st.title("Wardrobe Calculator")
-#     pin = st.text_input("Enter PIN", type="password")
-#     if pin:
-#         if pin == CALCULATOR_PIN:
-#             st.session_state.calc_authenticated = True
-#             st.rerun()
-#         else:
-#             st.error("Incorrect PIN")
-#     st.stop()
+ENABLE_PIN = False          # set True to enable PIN
+CALCULATOR_PIN = "1966"
 
+# IMPORTANT: set_page_config must be the first Streamlit command
 st.set_page_config(page_title="Wardrobe Calculator", layout="wide")
+
+# ============================================================
+# PAGE-LEVEL PIN
+# ============================================================
+if ENABLE_PIN:
+    if "calc_authenticated" not in st.session_state:
+        st.session_state.calc_authenticated = False
+
+    if not st.session_state.calc_authenticated:
+        st.title("Wardrobe Calculator")
+        pin = st.text_input("Enter PIN", type="password")
+        if pin:
+            if pin == CALCULATOR_PIN:
+                st.session_state.calc_authenticated = True
+                st.rerun()
+            else:
+                st.error("Incorrect PIN")
+        st.stop()
+
 st.header("Wardrobe Door & Liner Calculator")
 
 # ============================================================
@@ -36,13 +44,14 @@ MAX_DROPDOWN_LIMIT = 400
 FIXED_DOOR_HEIGHT = 2223
 FIXED_DOOR_WIDTH_OPTIONS = [610, 762, 914]
 
+# Terminology update:
 DOOR_SYSTEM_OPTIONS = [
-    "Custom (calculated panels)",
+    "Made to measure doors",
     "Fixed 2223mm doors",
 ]
 
 # Housebuilder rules:
-# - Dropdown fixed for custom mode
+# - Dropdown fixed for made-to-measure mode
 # - Story/Strata/Jones: dropdown 50 and side liner total build-out per side fixed at 50 (inclusive of 18)
 HOUSEBUILDER_RULES = {
     "Avant": {"dropdown": 90, "side_liner": BASE_SIDE_LINER_THICKNESS},
@@ -104,7 +113,11 @@ def draw_wardrobe_diagram(
     side_rel = side_thk_mm / opening_width_mm
     bottom_rel = bottom_thk_mm / opening_height_mm
     dropdown_rel = dropdown_height_mm / opening_height_mm if dropdown_height_mm > 0 else 0
-    door_h_rel = door_height_mm / opening_height_mm if door_height_mm > 0 else 0
+
+    # Clamp door height to usable height (between bottom liner and dropdown)
+    usable_rel_height = max(1 - bottom_rel - dropdown_rel, 0)
+    raw_door_rel = door_height_mm / opening_height_mm if door_height_mm > 0 else 0
+    door_h_rel = min(raw_door_rel, usable_rel_height)
 
     fig, ax = plt.subplots(figsize=(4, 7))
     ax.set_xlim(-0.45, 1.45)
@@ -140,7 +153,7 @@ def draw_wardrobe_diagram(
         ax.add_patch(Rectangle((x_start, bottom_rel), door_width_rel, door_h_rel, fill=False, linestyle="--", linewidth=1))
         x_start += door_width_rel
 
-    # Notes (no arrows for side liners and sub-cill as requested previously)
+    # Notes
     ax.annotate(
         "Side liners fixings -\n"
         "200mm in from either end\n"
@@ -198,7 +211,7 @@ DEFAULT_DATA = pd.DataFrame([{
     "Height_mm": 2600,
     "Doors": 3,
     "Housebuilder": "Bloor",
-    "Door_System": "Custom (calculated panels)",
+    "Door_System": "Made to measure doors",
     "Door_Style": "Classic",
     "Fixed_Door_Width_mm": 762,
 }])
@@ -212,7 +225,7 @@ if "openings_df" not in st.session_state:
 st.sidebar.subheader("System constants")
 st.sidebar.write(f"Bottom liner: **{BOTTOM_LINER_THICKNESS} mm**")
 st.sidebar.write(f"Trackset allowance: **{TRACKSET_HEIGHT} mm**")
-st.sidebar.write(f"Base side liner thickness: **{BASE_SIDE_LINER_THICKNESS} mm** (custom mode)")
+st.sidebar.write(f"Base side liner thickness: **{BASE_SIDE_LINER_THICKNESS} mm** (made-to-measure mode)")
 st.sidebar.write(f"Max custom door height: **{MAX_DOOR_HEIGHT} mm**")
 st.sidebar.write(f"Max dropdown allowed: **{MAX_DROPDOWN_LIMIT} mm**")
 st.sidebar.write(f"Fixed door height: **{FIXED_DOOR_HEIGHT} mm**")
@@ -296,7 +309,6 @@ def calculate_for_row(row: pd.Series) -> pd.Series:
             width_status = "OK (builder side liners locked)"
             net_width = width - 2 * side_thk
             span_diff = door_span - (net_width + total_overlap)
-            # If grossly off, warn
             if abs(span_diff) > 5:
                 width_status = "Check width (builder side liners locked)"
         else:
@@ -309,7 +321,7 @@ def calculate_for_row(row: pd.Series) -> pd.Series:
             net_width = width - 2 * side_thk
             span_diff = door_span - (net_width + total_overlap)
 
-        build_out_per_side = side_thk  # required build-out per side (total thickness per side)
+        build_out_per_side = side_thk
 
         issue_flag = "✅ OK" if (height_status == "OK" and width_status.startswith("OK")) else "🔴 Check"
 
@@ -337,9 +349,8 @@ def calculate_for_row(row: pd.Series) -> pd.Series:
         })
 
     # --------------------------
-    # CUSTOM (CALCULATED PANELS)
+    # MADE TO MEASURE DOORS
     # --------------------------
-    # Housebuilder controls dropdown and (for Story/Strata/Jones) side liner build-out
     dropdown_h = min(hb_dropdown, MAX_DROPDOWN_LIMIT)
     side_thk = hb_side_liner
 
@@ -412,12 +423,69 @@ csv = results_df.to_csv(index=False).encode("utf-8")
 st.download_button("Download CSV", csv, "wardrobe_results.csv", "text/csv")
 
 # ============================================================
-# VISUALISATION (DIAGRAM)
+# CUSTOMER SPECIFICATION BANNER (ABOVE DIAGRAM)
 # ============================================================
 st.subheader("3. Visualise opening")
 
 row = results_df.iloc[0]
 
+hb = row["Housebuilder"]
+door_system = row["Door_System"]
+dropdown = int(row["Dropdown_Height_mm"])
+side_liner = float(row["Side_Liner_Thickness_mm"])
+
+if door_system == "Made to measure doors":
+    if hb in ["Story", "Strata", "Jones Homes"]:
+        banner_text = f"""
+        <div style="font-size:20px; font-weight:800; margin-bottom:8px;">
+            CUSTOMER SPECIFICATION – MADE TO MEASURE DOORS
+        </div>
+        • Housebuilder <b>{hb}</b> mandates a <b>fixed 50mm dropdown</b><br>
+        • <b>Total side build-out per side is fixed at 50mm</b><br>
+        • This 50mm build-out <b>includes the 18mm T-liner</b><br>
+        • Door sizes are calculated to suit the remaining opening<br><br>
+        <b>No adjustment is permitted on dropdown or side build-out.</b>
+        """
+    else:
+        banner_text = f"""
+        <div style="font-size:20px; font-weight:800; margin-bottom:8px;">
+            CUSTOMER SPECIFICATION – MADE TO MEASURE DOORS
+        </div>
+        • Housebuilder <b>{hb}</b> mandates a <b>fixed {dropdown}mm dropdown</b><br>
+        • Standard <b>18mm T-liners</b> are applied per side<br>
+        • Door sizes are calculated to suit the net opening<br><br>
+        <b>Dropdown is fixed by the builder and must not be altered.</b>
+        """
+else:
+    banner_text = f"""
+    <div style="font-size:20px; font-weight:800; margin-bottom:8px;">
+        CUSTOMER SPECIFICATION – FIXED 2223mm DOORS
+    </div>
+    • Doors are supplied at a <b>fixed height of 2223mm</b><br>
+    • Dropdown is <b>calculated</b> from the remaining opening height<br>
+    • Side liner build-out may <b>increase</b> to suit door widths and overlaps<br>
+    • Housebuilder dropdown rules do <b>not</b> apply in this mode<br><br>
+    <b>Final dropdown and liner sizes must be checked before order.</b>
+    """
+
+st.markdown(
+    f"""
+    <div style="
+        border: 2px solid #1f2937;
+        background-color: #f9fafb;
+        padding: 16px;
+        margin-bottom: 20px;
+        border-radius: 10px;
+    ">
+        {banner_text}
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# ============================================================
+# VISUALISATION (DIAGRAM)
+# ============================================================
 fig = draw_wardrobe_diagram(
     opening_width_mm=row["Width_mm"],
     opening_height_mm=row["Height_mm"],
@@ -458,4 +526,6 @@ with col2:
     st.write("---")
     st.write(f"**Side liner thickness (each):** {row['Side_Liner_Thickness_mm']} mm")
     st.write(f"**Dropdown height:** {int(row['Dropdown_Height_mm'])} mm")
-    st.caption(f"Height stack includes bottom liner ({BOTTOM_LINER_THICKNESS}mm) + trackset ({TRACKSET_HEIGHT}mm).")
+    st.caption(
+        f"Height stack includes bottom liner ({BOTTOM_LINER_THICKNESS}mm) + trackset ({TRACKSET_HEIGHT}mm)."
+    )

@@ -38,7 +38,6 @@ BOTTOM_LINER_THICKNESS = 36
 TRACKSET_HEIGHT = 54
 BASE_SIDE_LINER_THICKNESS = 18
 MAX_DOOR_HEIGHT = 2500
-MAX_DROPDOWN_LIMIT = 400
 
 FIXED_DOOR_HEIGHT = 2223
 FIXED_DOOR_WIDTH_OPTIONS = [610, 762, 914]
@@ -90,6 +89,10 @@ def draw_wardrobe_diagram(
     num_doors,
     door_width_mm,
 ):
+    # Defensive guards
+    opening_width_mm = float(opening_width_mm) if opening_width_mm else 1.0
+    opening_height_mm = float(opening_height_mm) if opening_height_mm else 1.0
+
     side_rel = side_thk_mm / opening_width_mm
     bottom_rel = bottom_thk_mm / opening_height_mm
     dropdown_rel = dropdown_height_mm / opening_height_mm if dropdown_height_mm else 0
@@ -102,22 +105,29 @@ def draw_wardrobe_diagram(
     ax.axis("off")
     ax.set_aspect("equal")
 
+    # Outer opening
     ax.add_patch(Rectangle((0, 0), 1, 1, fill=False, lw=2))
+
+    # Side liners + bottom liner
     ax.add_patch(Rectangle((0, bottom_rel), side_rel, 1 - bottom_rel, alpha=0.25))
     ax.add_patch(Rectangle((1 - side_rel, bottom_rel), side_rel, 1 - bottom_rel, alpha=0.25))
     ax.add_patch(Rectangle((side_rel, 0), 1 - 2 * side_rel, bottom_rel, alpha=0.25))
 
+    # Dropdown (if any)
     if dropdown_rel:
-        ax.add_patch(Rectangle((side_rel, 1 - dropdown_rel), 1 - 2 * side_rel, dropdown_rel, alpha=0.25))
+        ax.add_patch(
+            Rectangle((side_rel, 1 - dropdown_rel), 1 - 2 * side_rel, dropdown_rel, alpha=0.25)
+        )
 
+    # Doors (dashed)
     door_width_rel = door_width_mm / opening_width_mm
     total_span = num_doors * door_width_rel
     available = 1 - 2 * side_rel
-    if total_span > available:
+    if total_span > available and total_span > 0:
         door_width_rel *= available / total_span
 
     x = side_rel
-    for _ in range(num_doors):
+    for _ in range(int(num_doors)):
         ax.add_patch(Rectangle((x, bottom_rel), door_width_rel, door_rel, fill=False, linestyle="--"))
         x += door_width_rel
 
@@ -127,16 +137,20 @@ def draw_wardrobe_diagram(
 # ============================================================
 # EMPTY INPUT ROW
 # ============================================================
-EMPTY_ROW = pd.DataFrame([{
-    "Opening": "",
-    "Width_mm": None,
-    "Height_mm": None,
-    "Doors": 2,
-    "Housebuilder": HOUSEBUILDER_OPTIONS[0],
-    "Door_System": DOOR_SYSTEM_OPTIONS[0],
-    "Door_Style": DOOR_STYLE_OPTIONS[0],
-    "Fixed_Door_Width_mm": 762,
-}])
+EMPTY_ROW = pd.DataFrame(
+    [
+        {
+            "Opening": "",
+            "Width_mm": None,
+            "Height_mm": None,
+            "Doors": 2,
+            "Housebuilder": HOUSEBUILDER_OPTIONS[0],
+            "Door_System": DOOR_SYSTEM_OPTIONS[0],
+            "Door_Style": DOOR_STYLE_OPTIONS[0],
+            "Fixed_Door_Width_mm": 762,
+        }
+    ]
+)
 
 
 def reset_inputs():
@@ -146,7 +160,6 @@ def reset_inputs():
 
 if "openings_df" not in st.session_state:
     reset_inputs()
-
 
 # ============================================================
 # 1. ENTER OPENING
@@ -165,17 +178,27 @@ edited_df = st.data_editor(
         "Width_mm": st.column_config.NumberColumn("Width (mm)", min_value=300),
         "Height_mm": st.column_config.NumberColumn("Height (mm)", min_value=300),
         "Doors": st.column_config.NumberColumn("Doors", min_value=2, max_value=10),
-        "Housebuilder": st.column_config.SelectboxColumn("Housebuilder", HOUSEBUILDER_OPTIONS),
-        "Door_System": st.column_config.SelectboxColumn("Door system", DOOR_SYSTEM_OPTIONS),
-        "Door_Style": st.column_config.SelectboxColumn("Door style", DOOR_STYLE_OPTIONS),
+        # ✅ IMPORTANT FIX: options= is keyword-only in newer Streamlit
+        "Housebuilder": st.column_config.SelectboxColumn(
+            "Housebuilder",
+            options=HOUSEBUILDER_OPTIONS,
+        ),
+        "Door_System": st.column_config.SelectboxColumn(
+            "Door system",
+            options=DOOR_SYSTEM_OPTIONS,
+        ),
+        "Door_Style": st.column_config.SelectboxColumn(
+            "Door style",
+            options=DOOR_STYLE_OPTIONS,
+        ),
         "Fixed_Door_Width_mm": st.column_config.SelectboxColumn(
-            "Fixed door width (fixed only)", FIXED_DOOR_WIDTH_OPTIONS
+            "Fixed door width (fixed only)",
+            options=FIXED_DOOR_WIDTH_OPTIONS,
         ),
     },
 )
 
 st.session_state["openings_df"] = edited_df
-
 
 # ============================================================
 # CALCULATION
@@ -184,45 +207,48 @@ def calculate(row):
     if pd.isna(row["Width_mm"]) or pd.isna(row["Height_mm"]):
         return pd.Series({"Issue": "—"})
 
-    width = row["Width_mm"]
-    height = row["Height_mm"]
-    doors = row["Doors"]
+    width = float(row["Width_mm"])
+    height = float(row["Height_mm"])
+    doors = int(row["Doors"])
 
     hb = row["Housebuilder"]
     rules = HOUSEBUILDER_RULES[hb]
-    dropdown = rules["dropdown"]
-    side_thk = rules["side_liner"]
+    dropdown_spec = float(rules["dropdown"])
+    side_thk = float(rules["side_liner"])
 
-    overlaps = overlaps_count(doors) * DOOR_STYLE_OVERLAP[row["Door_Style"]]
+    overlap_each = float(DOOR_STYLE_OVERLAP[row["Door_Style"]])
+    overlaps_total = overlaps_count(doors) * overlap_each
+
     net_width = width - 2 * side_thk
 
     if row["Door_System"] == "Fixed 2223mm doors":
         door_h = FIXED_DOOR_HEIGHT
         dropdown_h = max(height - (BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT + door_h), 0)
-        door_w = row["Fixed_Door_Width_mm"]
+        door_w = float(row["Fixed_Door_Width_mm"])
         span = doors * door_w
-        issue = "✅ OK" if net_width + overlaps >= span else "🔴 Check"
+        issue = "✅ OK" if (net_width + overlaps_total) >= span else "🔴 Check"
     else:
-        dropdown_h = dropdown
+        dropdown_h = dropdown_spec
         door_h = min(height - (BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT + dropdown_h), MAX_DOOR_HEIGHT)
-        door_w = (net_width + overlaps) / doors
-        span = net_width + overlaps
+        door_w = (net_width + overlaps_total) / doors
+        span = net_width + overlaps_total
         issue = "✅ OK"
 
-    return pd.Series({
-        "Door_Height_mm": int(door_h),
-        "Door_Width_mm": int(door_w),
-        "Doors_Used": doors,
-        "Dropdown_Height_mm": int(dropdown_h),
-        "Side_Liner_Thickness_mm": side_thk,
-        "Net_Width_mm": int(net_width),
-        "Door_Span_mm": int(span),
-        "Issue": issue,
-    })
+    return pd.Series(
+        {
+            "Door_Height_mm": int(round(door_h)),
+            "Door_Width_mm": int(round(door_w)),
+            "Doors_Used": doors,
+            "Dropdown_Height_mm": int(round(dropdown_h)),
+            "Side_Liner_Thickness_mm": int(round(side_thk)),
+            "Net_Width_mm": int(round(net_width)),
+            "Door_Span_mm": int(round(span)),
+            "Issue": issue,
+        }
+    )
 
 
 results = pd.concat([edited_df, edited_df.apply(calculate, axis=1)], axis=1)
-
 
 # ============================================================
 # 2. CALCULATED RESULTS (HIDDEN)
@@ -231,21 +257,20 @@ st.subheader("2. Calculated results")
 with st.expander("Show calculated table"):
     st.dataframe(results, use_container_width=True)
 
-
 # ============================================================
 # 3. VISUALISE OPENING
 # ============================================================
 st.subheader("3. Visualise opening")
 
 row = results.iloc[0]
-if pd.isna(row["Width_mm"]):
+if pd.isna(row["Width_mm"]) or pd.isna(row["Height_mm"]):
     st.info("Enter an opening above to generate the diagram.")
     st.stop()
 
 # Installer-friendly banner
 hb = row["Housebuilder"]
-dropdown = row["Dropdown_Height_mm"]
-side_liner = row["Side_Liner_Thickness_mm"]
+dropdown = row.get("Dropdown_Height_mm", 0)
+side_liner = row.get("Side_Liner_Thickness_mm", 0)
 
 if row["Door_System"] == "Made to measure doors":
     if hb in ["Story", "Strata", "Jones Homes"]:

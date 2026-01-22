@@ -185,20 +185,7 @@ def draw_wardrobe_diagram(
 # ============================================================
 # DEFAULT / EMPTY INPUT TABLE (START BLANK)
 # ============================================================
-INPUT_COLS = [
-    "Job",
-    "Opening",
-    "Width_mm",
-    "Height_mm",
-    "Doors",
-    "Housebuilder",
-    "Door_System",
-    "Door_Style",
-    "Fixed_Door_Width_mm",
-]
-
 DEFAULT_EMPTY = pd.DataFrame([{
-    "Job": "",
     "Opening": "",
     "Width_mm": None,
     "Height_mm": None,
@@ -212,7 +199,6 @@ DEFAULT_EMPTY = pd.DataFrame([{
 
 def reset_inputs():
     st.session_state["openings_df"] = DEFAULT_EMPTY.copy()
-    # also reset editor widget state if present
     if "openings_table" in st.session_state:
         st.session_state["openings_table"] = DEFAULT_EMPTY.copy()
 
@@ -246,7 +232,6 @@ edited_df = st.data_editor(
     use_container_width=True,
     key="openings_table",
     column_config={
-        "Job": st.column_config.TextColumn("Job"),
         "Opening": st.column_config.TextColumn("Opening"),
         "Width_mm": st.column_config.NumberColumn("Width (mm)", min_value=300, step=10),
         "Height_mm": st.column_config.NumberColumn("Height (mm)", min_value=300, step=10),
@@ -268,7 +253,6 @@ st.session_state["openings_df"] = edited_df
 # CALCULATION FUNCTION
 # ============================================================
 def calculate_for_row(row: pd.Series) -> pd.Series:
-    # Handle blank inputs gracefully
     if pd.isna(row.get("Width_mm")) or pd.isna(row.get("Height_mm")):
         return pd.Series({
             "Issue": "—",
@@ -294,9 +278,6 @@ def calculate_for_row(row: pd.Series) -> pd.Series:
 
     height_stack_base = BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT
 
-    # --------------------------
-    # FIXED 2223mm DOOR SYSTEM
-    # --------------------------
     if door_system == "Fixed 2223mm doors":
         door_height = FIXED_DOOR_HEIGHT
 
@@ -358,12 +339,9 @@ def calculate_for_row(row: pd.Series) -> pd.Series:
             "Issue": issue_flag,
         })
 
-    # --------------------------
-    # MADE TO MEASURE DOORS
-    # --------------------------
+    # Made to measure doors
     dropdown_h = min(hb_dropdown, MAX_DROPDOWN_LIMIT)
     side_thk = hb_side_liner
-
     net_width = width - 2 * side_thk
 
     raw_door_height = height - height_stack_base - dropdown_h
@@ -423,11 +401,9 @@ st.subheader("2. Calculated results")
 calcs = edited_df.apply(calculate_for_row, axis=1)
 results_df = pd.concat([edited_df.reset_index(drop=True), calcs.reset_index(drop=True)], axis=1)
 
-# Hide the big table by default
 with st.expander("Show calculated table", expanded=False):
     st.dataframe(results_df, use_container_width=True)
 
-# Only show warning + download if we have calculated values
 if "Issue" in results_df.columns and (results_df["Issue"] == "🔴 Check").any():
     st.warning("One or more checks failed. Review Height/Width status and span difference.")
 
@@ -436,18 +412,16 @@ if results_df.get("Issue", pd.Series(["—"])).iloc[0] != "—":
     st.download_button("Download CSV", csv, "wardrobe_results.csv", "text/csv")
 
 # ============================================================
-# 3. VISUALISE OPENING (ONLY IF INPUTS ENTERED)
+# 3. VISUALISE OPENING
 # ============================================================
 st.subheader("3. Visualise opening")
 
 row = results_df.iloc[0]
 
-# If not ready, stop before diagram
 if pd.isna(row.get("Width_mm")) or pd.isna(row.get("Height_mm")):
     st.info("Enter width and height in Section 1 to generate results and the diagram.")
     st.stop()
 
-# CUSTOMER SPECIFICATION BANNER
 hb = row["Housebuilder"]
 door_system = row["Door_System"]
 dropdown = int(row.get("Dropdown_Height_mm", 0))
@@ -519,6 +493,7 @@ with col1:
 
 with col2:
     st.markdown("#### Summary")
+    st.write(f"**Opening:** {row.get('Opening','')}")
     st.write(f"**Housebuilder:** {row['Housebuilder']}")
     st.write(f"**Door system:** {row['Door_System']}")
     st.write(f"**Door style:** {row['Door_Style']}")

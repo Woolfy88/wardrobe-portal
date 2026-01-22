@@ -36,11 +36,12 @@ st.header("Wardrobe Door & Liner Calculator")
 # ============================================================
 BOTTOM_LINER_THICKNESS = 36
 TRACKSET_HEIGHT = 54
+
 BASE_SIDE_LINER_THICKNESS = 18
 T_LINER_50_PLUS_SIDE_18 = 68  # 50mm T-liner + 18mm side liner
 
 MAX_DOOR_HEIGHT = 2500
-MAX_DROPDOWN_LIMIT = 400
+MAX_DROPDOWN_LIMIT = 400  # not used here but kept for compatibility
 
 FIXED_DOOR_HEIGHT = 2223
 FIXED_DOOR_WIDTH_OPTIONS = [610, 762, 914]
@@ -50,7 +51,10 @@ DOOR_SYSTEM_OPTIONS = [
     "Fixed 2223mm doors",
 ]
 
-# NOTE: Story/Strata/Jones Homes now use 68mm per side as default (50 + 18)
+# Client rules
+# - Avant / Homes By Honey: dropdown 90, side liner 18 each side
+# - Bloor: dropdown 108, side liner 18 each side
+# - Story / Strata / Jones Homes: dropdown 50, liners are 68mm each side (50 T-liner + 18 side liner)
 HOUSEBUILDER_RULES = {
     "Avant": {"dropdown": 90, "side_liner": BASE_SIDE_LINER_THICKNESS},
     "Homes By Honey": {"dropdown": 90, "side_liner": BASE_SIDE_LINER_THICKNESS},
@@ -83,12 +87,18 @@ def overlaps_count(n: int) -> int:
 def side_thicknesses(hb: str, end_panels: int):
     """
     Returns (left_thk, right_thk) in mm.
-    - Default for hb is HOUSEBUILDER_RULES[hb]["side_liner"] on BOTH sides.
-    - If end_panels == 1: one side becomes 18mm (end panel), the other remains hb rule.
-      (We don't care left/right, so we arbitrarily put 18mm on right.)
-    - If end_panels == 2: both sides become 18mm.
+
+    Default:
+      - both sides = HOUSEBUILDER_RULES[hb]["side_liner"]
+
+    End panels:
+      - 0: no change
+      - 1: one side becomes 18mm, the other remains housebuilder rule
+      - 2: both sides become 18mm
+
+    (We don't care left/right, so for 1 we arbitrarily apply 18mm on the right.)
     """
-    base = HOUSEBUILDER_RULES[hb]["side_liner"]
+    base = int(HOUSEBUILDER_RULES[hb]["side_liner"])
 
     end_panels = int(end_panels or 0)
     end_panels = max(0, min(end_panels, 2))
@@ -114,19 +124,21 @@ def draw_wardrobe_diagram(
     num_doors,
     door_width_mm,
 ):
-    # Protect against divide-by-zero
     if not opening_width_mm or not opening_height_mm:
         fig, ax = plt.subplots(figsize=(4, 7))
         ax.axis("off")
         return fig
 
+    opening_width_mm = float(opening_width_mm)
+    opening_height_mm = float(opening_height_mm)
+
     left_rel = left_thk_mm / opening_width_mm
     right_rel = right_thk_mm / opening_width_mm
     bottom_rel = bottom_thk_mm / opening_height_mm
-    dropdown_rel = dropdown_height_mm / opening_height_mm if dropdown_height_mm else 0
+    dropdown_rel = (dropdown_height_mm / opening_height_mm) if dropdown_height_mm else 0
 
     usable_height_rel = max(1 - bottom_rel - dropdown_rel, 0)
-    door_rel = min(door_height_mm / opening_height_mm, usable_height_rel)
+    door_rel = min((door_height_mm / opening_height_mm), usable_height_rel)
 
     fig, ax = plt.subplots(figsize=(4, 7))
     ax.set_xlim(-0.4, 1.4)
@@ -134,28 +146,44 @@ def draw_wardrobe_diagram(
     ax.axis("off")
     ax.set_aspect("equal")
 
-    # Outer opening
+    # Opening outline
     ax.add_patch(Rectangle((0, 0), 1, 1, fill=False, lw=2))
 
-    # Side liners + bottom
+    # Side liners and bottom liner
     ax.add_patch(Rectangle((0, bottom_rel), left_rel, 1 - bottom_rel, alpha=0.25))
     ax.add_patch(Rectangle((1 - right_rel, bottom_rel), right_rel, 1 - bottom_rel, alpha=0.25))
     ax.add_patch(Rectangle((left_rel, 0), 1 - left_rel - right_rel, bottom_rel, alpha=0.25))
 
     # Dropdown (top)
     if dropdown_rel:
-        ax.add_patch(Rectangle((left_rel, 1 - dropdown_rel), 1 - left_rel - right_rel, dropdown_rel, alpha=0.25))
+        ax.add_patch(
+            Rectangle(
+                (left_rel, 1 - dropdown_rel),
+                1 - left_rel - right_rel,
+                dropdown_rel,
+                alpha=0.25,
+            )
+        )
 
     # Doors (dashed)
-    door_width_rel = door_width_mm / opening_width_mm
+    door_width_rel = float(door_width_mm) / opening_width_mm
     available = 1 - left_rel - right_rel
     total_span = num_doors * door_width_rel
+
     if total_span > available and total_span > 0:
         door_width_rel *= available / total_span
 
     x = left_rel
-    for _ in range(num_doors):
-        ax.add_patch(Rectangle((x, bottom_rel), door_width_rel, door_rel, fill=False, linestyle="--"))
+    for _ in range(int(num_doors)):
+        ax.add_patch(
+            Rectangle(
+                (x, bottom_rel),
+                door_width_rel,
+                door_rel,
+                fill=False,
+                linestyle="--",
+            )
+        )
         x += door_width_rel
 
     return fig
@@ -164,17 +192,21 @@ def draw_wardrobe_diagram(
 # ============================================================
 # EMPTY INPUT ROW
 # ============================================================
-EMPTY_ROW = pd.DataFrame([{
-    "Opening": "",
-    "Width_mm": None,
-    "Height_mm": None,
-    "Doors": 2,
-    "Housebuilder": HOUSEBUILDER_OPTIONS[0],
-    "Door_System": DOOR_SYSTEM_OPTIONS[0],
-    "Door_Style": DOOR_STYLE_OPTIONS[0],
-    "Fixed_Door_Width_mm": 762,
-    "End_Panels": 0,   # NEW: 0 / 1 / 2
-}])
+EMPTY_ROW = pd.DataFrame(
+    [
+        {
+            "Opening": "",
+            "Width_mm": None,
+            "Height_mm": None,
+            "Doors": 2,
+            "Housebuilder": HOUSEBUILDER_OPTIONS[0],
+            "Door_System": DOOR_SYSTEM_OPTIONS[0],
+            "Door_Style": DOOR_STYLE_OPTIONS[0],
+            "Fixed_Door_Width_mm": 762,
+            "End_Panels": 0,  # NEW: 0/1/2
+        }
+    ]
+)
 
 
 def reset_inputs():
@@ -202,14 +234,28 @@ edited_df = st.data_editor(
         "Width_mm": st.column_config.NumberColumn("Width (mm)", min_value=300),
         "Height_mm": st.column_config.NumberColumn("Height (mm)", min_value=300),
         "Doors": st.column_config.NumberColumn("Doors", min_value=2, max_value=10),
-        "Housebuilder": st.column_config.SelectboxColumn("Housebuilder", HOUSEBUILDER_OPTIONS),
-        "Door_System": st.column_config.SelectboxColumn("Door system", DOOR_SYSTEM_OPTIONS),
-        "Door_Style": st.column_config.SelectboxColumn("Door style", DOOR_STYLE_OPTIONS),
+        "Housebuilder": st.column_config.SelectboxColumn(
+            "Housebuilder",
+            options=HOUSEBUILDER_OPTIONS,
+            required=True,
+        ),
+        "Door_System": st.column_config.SelectboxColumn(
+            "Door system",
+            options=DOOR_SYSTEM_OPTIONS,
+            required=True,
+        ),
+        "Door_Style": st.column_config.SelectboxColumn(
+            "Door style",
+            options=DOOR_STYLE_OPTIONS,
+            required=True,
+        ),
         "Fixed_Door_Width_mm": st.column_config.SelectboxColumn(
-            "Fixed door width (fixed only)", FIXED_DOOR_WIDTH_OPTIONS
+            "Fixed door width (fixed only)",
+            options=FIXED_DOOR_WIDTH_OPTIONS,
         ),
         "End_Panels": st.column_config.SelectboxColumn(
-            "End panels (0/1/2)", options=[0, 1, 2]
+            "End panels (0/1/2)",
+            options=[0, 1, 2],
         ),
     },
 )
@@ -229,7 +275,7 @@ def calculate(row):
 
     hb = row["Housebuilder"]
     rules = HOUSEBUILDER_RULES[hb]
-    dropdown = int(rules["dropdown"])
+    dropdown_default = int(rules["dropdown"])
 
     end_panels = int(row.get("End_Panels", 0) or 0)
     left_thk, right_thk = side_thicknesses(hb, end_panels)
@@ -240,29 +286,33 @@ def calculate(row):
     if row["Door_System"] == "Fixed 2223mm doors":
         door_h = FIXED_DOOR_HEIGHT
         dropdown_h = max(height - (BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT + door_h), 0)
+
         door_w = int(row["Fixed_Door_Width_mm"])
         span_required = doors * door_w
-        issue = "✅ OK" if net_width + overlaps >= span_required else "🔴 Check"
+
+        issue = "✅ OK" if (net_width + overlaps) >= span_required else "🔴 Check"
         span = span_required
     else:
-        dropdown_h = dropdown
+        dropdown_h = dropdown_default
         door_h = min(height - (BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT + dropdown_h), MAX_DOOR_HEIGHT)
         door_w = (net_width + overlaps) / doors
         span = net_width + overlaps
         issue = "✅ OK"
 
-    return pd.Series({
-        "Door_Height_mm": int(door_h),
-        "Door_Width_mm": int(door_w),
-        "Doors_Used": doors,
-        "Dropdown_Height_mm": int(dropdown_h),
-        "End_Panels": end_panels,
-        "Left_Liner_Thickness_mm": int(left_thk),
-        "Right_Liner_Thickness_mm": int(right_thk),
-        "Net_Width_mm": int(net_width),
-        "Door_Span_mm": int(span),
-        "Issue": issue,
-    })
+    return pd.Series(
+        {
+            "Door_Height_mm": int(door_h),
+            "Door_Width_mm": int(door_w),
+            "Doors_Used": doors,
+            "Dropdown_Height_mm": int(dropdown_h),
+            "End_Panels": end_panels,
+            "Left_Liner_Thickness_mm": int(left_thk),
+            "Right_Liner_Thickness_mm": int(right_thk),
+            "Net_Width_mm": int(net_width),
+            "Door_Span_mm": int(span),
+            "Issue": issue,
+        }
+    )
 
 
 results = pd.concat([edited_df, edited_df.apply(calculate, axis=1)], axis=1)
@@ -287,25 +337,25 @@ if pd.isna(row["Width_mm"]):
 hb = row["Housebuilder"]
 dropdown = int(row["Dropdown_Height_mm"])
 end_panels = int(row.get("End_Panels", 0) or 0)
+
 left_thk = int(row["Left_Liner_Thickness_mm"])
 right_thk = int(row["Right_Liner_Thickness_mm"])
 
 # Installer-friendly banner
 if row["Door_System"] == "Made to measure doors":
     if hb in ["Story", "Strata", "Jones Homes"]:
-        # Base rule is 68mm each side (50+18), unless end panels reduce to 18mm on 1 or both sides
         msg = f"""
-        • Fit a **50mm dropdown** (fixed by the client’s specification)<br>
-        • Side build-out is **68mm per side** (50mm T-liner + 18mm side liner) unless end panels are selected<br>
-        • End panels selected: **{end_panels}** → liners are **{left_thk}mm** and **{right_thk}mm**<br>
+        • Fit a <b>50mm dropdown</b> (fixed by the client’s specification)<br>
+        • Default liners are <b>68mm per side</b> (50mm T-liner + 18mm side liner)<br>
+        • End panels selected: <b>{end_panels}</b> → liners are <b>{left_thk}mm</b> and <b>{right_thk}mm</b><br>
         • Doors are made to suit what remains after dropdown and liners<br><br>
         <b>Do not adjust dropdown or liner rules on site</b>
         """
     else:
         msg = f"""
-        • Fit a **{dropdown}mm dropdown** (fixed by the client’s specification)<br>
-        • Fit **standard 18mm T-liners** each side (unless end panels selected)<br>
-        • End panels selected: **{end_panels}** → liners are **{left_thk}mm** and **{right_thk}mm**<br>
+        • Fit a <b>{dropdown}mm dropdown</b> (fixed by the client’s specification)<br>
+        • Default liners are <b>18mm per side</b> unless end panels are selected<br>
+        • End panels selected: <b>{end_panels}</b> → liners are <b>{left_thk}mm</b> and <b>{right_thk}mm</b><br>
         • Doors are made to measure to suit the net opening<br><br>
         <b>Do not change the dropdown height</b>
         """

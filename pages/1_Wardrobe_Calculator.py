@@ -43,6 +43,9 @@ DOOR_STYLE_OVERLAP = {
 }
 DOOR_STYLE_OPTIONS = list(DOOR_STYLE_OVERLAP.keys())
 
+# Builders that are allowed to choose fixed door widths (workaround/logic gate)
+FIXED_WIDTH_BUILDERS = {"Avant", "Homes By Honey"}
+
 
 def overlaps_count(n: int) -> int:
     n = max(int(n), 1)
@@ -78,7 +81,6 @@ def draw_wardrobe_diagram(
     bottom_rel = bottom_thk_mm / opening_height_mm
     dropdown_rel = dropdown_height_mm / opening_height_mm if dropdown_height_mm > 0 else 0
 
-    # Door height relative (clamped so it doesn't run into dropdown zone)
     usable_rel_height = max(1 - bottom_rel - dropdown_rel, 0)
     raw_door_rel = door_height_mm / opening_height_mm if door_height_mm > 0 else 0
     door_h_rel = min(raw_door_rel, usable_rel_height)
@@ -119,10 +121,9 @@ def draw_wardrobe_diagram(
         )
         x_start += door_width_rel
 
-    # =====================================================
-    # LABELS (thicknesses) - minimal clutter
-    # =====================================================
-    # Side liner thickness label
+    # ======================
+    # Labels (thicknesses)
+    # ======================
     if side_thk_mm > 0:
         ax.text(
             side_rel / 2,
@@ -143,7 +144,6 @@ def draw_wardrobe_diagram(
             bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="black", lw=0.8),
         )
 
-    # Bottom liner thickness label
     if bottom_thk_mm > 0:
         ax.text(
             0.5,
@@ -155,7 +155,6 @@ def draw_wardrobe_diagram(
             bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="black", lw=0.8),
         )
 
-    # Dropdown label
     if dropdown_height_mm > 0:
         ax.text(
             0.5,
@@ -167,9 +166,9 @@ def draw_wardrobe_diagram(
             bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="black", lw=0.8),
         )
 
-    # =====================================================
-    # FIXINGS / BEST PRACTICE NOTES
-    # =====================================================
+    # ======================
+    # Fixings / Best practice
+    # ======================
     ax.annotate(
         "Side liners fixings -\n"
         "200mm in from either end\n"
@@ -207,9 +206,9 @@ def draw_wardrobe_diagram(
         arrowprops=dict(arrowstyle="->", lw=1.3),
     )
 
-    # =====================================================
-    # DIMENSIONS (width / height)
-    # =====================================================
+    # ======================
+    # Dimensions (width/height)
+    # ======================
     ax.annotate("", xy=(-0.22, 0), xytext=(-0.22, 1), arrowprops=dict(arrowstyle="<->", lw=1))
     ax.text(-0.30, 0.5, f"{int(opening_height_mm)}mm", rotation=90, fontsize=9, ha="center", va="center")
 
@@ -239,7 +238,8 @@ def calculate(width, height, doors, hb, door_system, door_style, fixed_door_widt
     if door_system == "Fixed 2223mm doors":
         door_height = FIXED_DOOR_HEIGHT
 
-        door_width = float(fixed_door_width_mm) if hb == "Avant" else 762.0
+        # Only use selected fixed width when builder is in FIXED_WIDTH_BUILDERS
+        door_width = float(fixed_door_width_mm) if hb in FIXED_WIDTH_BUILDERS else 762.0
         if int(door_width) not in FIXED_DOOR_WIDTH_OPTIONS:
             door_width = 762.0
 
@@ -272,15 +272,13 @@ def calculate(width, height, doors, hb, door_system, door_style, fixed_door_widt
             "Dropdown_Height_mm": int(round(dropdown_h)),
             "Side_Liner_Thickness_mm": round(side_thk, 1),
             "Net_Width_mm": int(round(net_width)),
-            "Overlap_Per_Meeting_mm": overlap,
-            "Overlaps_Count": overlaps_count(doors),
             "Total_Overlap_mm": int(total_overlap),
             "Door_Span_mm": int(round(door_span)),
             "Span_Diff_mm": round(span_diff, 1),
             "Height_Status": height_status,
             "Width_Status": width_status,
             "Issue": issue,
-            "Fixed_Door_Width_Used": "Yes (Avant)" if hb == "Avant" else "No",
+            "Fixed_Door_Width_Used": "Yes" if hb in FIXED_WIDTH_BUILDERS else "No",
             "Applied_Builder_Dropdown_mm": hb_dropdown,
             "Applied_Builder_SideLiner_mm": side_thk,
         }
@@ -298,7 +296,6 @@ def calculate(width, height, doors, hb, door_system, door_style, fixed_door_widt
         height_status = "OK" if raw_door_height <= MAX_DOOR_HEIGHT else f"Door height capped at {MAX_DOOR_HEIGHT}mm."
 
     door_width = (net_width + total_overlap) / doors if doors > 0 else 0
-    door_span = doors * door_width
 
     width_status = "OK" if net_width > 0 else "Opening too small once side liners applied."
     issue = "✅ OK" if (height_status == "OK" and width_status == "OK") else "🔴 Check"
@@ -315,22 +312,20 @@ def calculate(width, height, doors, hb, door_system, door_style, fixed_door_widt
         "Dropdown_Height_mm": int(round(dropdown_h)),
         "Side_Liner_Thickness_mm": round(side_thk, 1),
         "Net_Width_mm": int(round(net_width)),
-        "Overlap_Per_Meeting_mm": overlap,
-        "Overlaps_Count": overlaps_count(doors),
         "Total_Overlap_mm": int(total_overlap),
-        "Door_Span_mm": int(round(door_span)),
+        "Door_Span_mm": int(round(doors * door_width)),
         "Span_Diff_mm": 0.0,
         "Height_Status": height_status,
         "Width_Status": width_status,
         "Issue": issue,
-        "Fixed_Door_Width_Used": "N/A (MTM)",
+        "Fixed_Door_Width_Used": "N/A",
         "Applied_Builder_Dropdown_mm": hb_dropdown,
         "Applied_Builder_SideLiner_mm": side_thk,
     }
 
 
 # ============================================================
-# INSTALLER LITE MODE UI (ONLY MODE)
+# INSTALLER INPUTS (ONLY MODE)
 # ============================================================
 st.subheader("Installer inputs")
 
@@ -350,13 +345,17 @@ with c5:
 with c6:
     door_style = st.selectbox("Door style", DOOR_STYLE_OPTIONS, index=DOOR_STYLE_OPTIONS.index("Classic"))
 
+# Fixed width only shown for Avant + Homes By Honey
 fixed_door_width_mm = 762
-if hb == "Avant":
-    fixed_door_width_mm = st.selectbox("Fixed door width (Avant only)", FIXED_DOOR_WIDTH_OPTIONS, index=1)
+if hb in FIXED_WIDTH_BUILDERS:
+    fixed_door_width_mm = st.selectbox(
+        "Fixed door width (Avant / Homes By Honey)",
+        FIXED_DOOR_WIDTH_OPTIONS,
+        index=1,
+    )
 else:
-    st.caption("Fixed door width is only used when Housebuilder = Avant.")
+    st.caption("Fixed door width is only used when Housebuilder = Avant or Homes By Honey.")
 
-# Block until width/height entered
 if width_mm is None or height_mm is None:
     st.info("Enter width and height to generate the installer view.")
     st.stop()
@@ -395,11 +394,10 @@ else:
 
 **Final sizes must be checked before order.**
 """
-
 st.info(banner)
 
 # ============================================================
-# KEY OUTPUTS (installer friendly)
+# KEY OUTPUTS
 # ============================================================
 st.subheader("Key outputs")
 
@@ -416,9 +414,7 @@ s2.metric("Total overlap (mm)", res["Total_Overlap_mm"])
 s3.metric("Issue", res["Issue"])
 
 if door_system == "Fixed 2223mm doors":
-    st.caption(
-        f"Span difference check: {res['Span_Diff_mm']}mm (aim ±5mm).  Fixed door width used: {res['Fixed_Door_Width_Used']}"
-    )
+    st.caption(f"Span difference check: {res['Span_Diff_mm']}mm (aim ±5mm).  Fixed door width used: {res['Fixed_Door_Width_Used']}")
 
 if res["Issue"] == "🔴 Check":
     st.warning("Check the statuses below and confirm sizes before ordering / fitting.")

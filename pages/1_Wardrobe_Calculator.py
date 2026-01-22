@@ -8,6 +8,8 @@ from matplotlib.patches import Rectangle
 # ============================================================
 ENABLE_PIN = False
 CALCULATOR_PIN = "1966"
+
+# IMPORTANT: must be the first Streamlit call
 st.set_page_config(page_title="Wardrobe Calculator", layout="wide")
 
 # ============================================================
@@ -16,6 +18,7 @@ st.set_page_config(page_title="Wardrobe Calculator", layout="wide")
 if ENABLE_PIN:
     if "calc_authenticated" not in st.session_state:
         st.session_state.calc_authenticated = False
+
     if not st.session_state.calc_authenticated:
         st.title("Wardrobe Calculator")
         pin = st.text_input("Enter PIN", type="password")
@@ -69,6 +72,13 @@ DOOR_STYLE_OPTIONS = list(DOOR_STYLE_OVERLAP.keys())
 
 
 def overlaps_count(n: int) -> int:
+    """Overlap-count rules:
+       2 doors -> 1 overlap
+       3 doors -> 2 overlaps
+       4 doors -> 2 overlaps
+       5 doors -> 4 overlaps
+       fallback: doors - 1
+    """
     n = max(int(n), 1)
     if n == 2:
         return 1
@@ -92,20 +102,18 @@ def get_side_thicknesses(housebuilder: str, end_panel: bool, end_panel_side: str
       - end_panel_side indicates which side becomes 18mm
     """
     rule = HOUSEBUILDER_RULES.get(housebuilder, {"dropdown": 108, "side_each": BASE_SIDE_LINER_THICKNESS})
-    special_each = float(rule["side_each"])
+    each = float(rule["side_each"])
 
-    # Default symmetric
-    left = special_each
-    right = special_each
+    left = each
+    right = each
 
-    # End panel applied ONLY makes sense for the special 68mm builders, but we’ll apply the same pattern generally
     if end_panel:
         if str(end_panel_side).lower().startswith("left"):
             left = BASE_SIDE_LINER_THICKNESS
-            right = special_each
+            right = each
         else:
             right = BASE_SIDE_LINER_THICKNESS
-            left = special_each
+            left = each
 
     return float(left), float(right)
 
@@ -142,21 +150,15 @@ def draw_wardrobe_diagram(
     ax.axis("off")
     ax.set_aspect("equal")
 
-    # Opening outline
     ax.add_patch(Rectangle((0, 0), 1, 1, fill=False, lw=2))
 
-    # Side liners (left/right independently)
     ax.add_patch(Rectangle((0, bottom_rel), left_rel, 1 - bottom_rel, alpha=0.25))
     ax.add_patch(Rectangle((1 - right_rel, bottom_rel), right_rel, 1 - bottom_rel, alpha=0.25))
-
-    # Bottom liner
     ax.add_patch(Rectangle((left_rel, 0), 1 - left_rel - right_rel, bottom_rel, alpha=0.25))
 
-    # Dropdown
     if dropdown_rel:
         ax.add_patch(Rectangle((left_rel, 1 - dropdown_rel), 1 - left_rel - right_rel, dropdown_rel, alpha=0.25))
 
-    # Doors (dashed)
     num_doors = max(int(num_doors), 1)
     door_width_mm = max(float(door_width_mm), 0)
     door_width_rel = (door_width_mm / opening_width_mm) if opening_width_mm else 0
@@ -175,7 +177,7 @@ def draw_wardrobe_diagram(
 
 
 # ============================================================
-# EMPTY INPUT ROW
+# EMPTY INPUT ROW (START BLANK)
 # ============================================================
 EMPTY_ROW = pd.DataFrame([{
     "Opening": "",
@@ -215,24 +217,28 @@ edited_df = st.data_editor(
         "Width_mm": st.column_config.NumberColumn("Width (mm)", min_value=300, step=10),
         "Height_mm": st.column_config.NumberColumn("Height (mm)", min_value=300, step=10),
         "Doors": st.column_config.NumberColumn("Doors", min_value=2, max_value=10, step=1),
-        "Housebuilder": st.column_config.SelectboxColumn("Housebuilder", HOUSEBUILDER_OPTIONS),
-        "Door_System": st.column_config.SelectboxColumn("Door system", DOOR_SYSTEM_OPTIONS),
-        "Door_Style": st.column_config.SelectboxColumn("Door style", DOOR_STYLE_OPTIONS),
+
+        # IMPORTANT: options=... must be keyword arg (fixes your TypeError)
+        "Housebuilder": st.column_config.SelectboxColumn("Housebuilder", options=HOUSEBUILDER_OPTIONS),
+        "Door_System": st.column_config.SelectboxColumn("Door system", options=DOOR_SYSTEM_OPTIONS),
+        "Door_Style": st.column_config.SelectboxColumn("Door style", options=DOOR_STYLE_OPTIONS),
+
         "Fixed_Door_Width_mm": st.column_config.SelectboxColumn(
-            "Fixed door width (fixed only)", FIXED_DOOR_WIDTH_OPTIONS
+            "Fixed door width (fixed only)",
+            options=FIXED_DOOR_WIDTH_OPTIONS,
+            default=762,
         ),
+
         "End_Panel": st.column_config.CheckboxColumn("End panel"),
-        "End_Panel_Side": st.column_config.SelectboxColumn("End panel side", ["Left", "Right"]),
+        "End_Panel_Side": st.column_config.SelectboxColumn("End panel side", options=["Left", "Right"]),
     },
 )
-
 st.session_state["openings_df"] = edited_df
-
 
 # ============================================================
 # CALCULATION
 # ============================================================
-def calculate(row):
+def calculate(row: pd.Series) -> pd.Series:
     if pd.isna(row.get("Width_mm")) or pd.isna(row.get("Height_mm")):
         return pd.Series({"Issue": "—"})
 
@@ -250,15 +256,14 @@ def calculate(row):
     side_left, side_right = get_side_thicknesses(hb, end_panel, end_panel_side)
     net_width = width - side_left - side_right
 
-    overlap_per_meeting = DOOR_STYLE_OVERLAP.get(row.get("Door_Style", "Classic"), 35)
+    overlap_per_meeting = int(DOOR_STYLE_OVERLAP.get(row.get("Door_Style", "Classic"), 35))
     total_overlap = overlaps_count(doors) * overlap_per_meeting
 
     height_stack_base = BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT
-
     door_system = row.get("Door_System", DOOR_SYSTEM_OPTIONS[0])
 
     # --------------------------
-    # FIXED 2223mm DOOR SYSTEM
+    # FIXED 2223mm DOORS
     # --------------------------
     if door_system == "Fixed 2223mm doors":
         door_h = FIXED_DOOR_HEIGHT
@@ -273,12 +278,12 @@ def calculate(row):
             dropdown_h = MAX_DROPDOWN_LIMIT
 
         door_span = doors * door_w
-        effective_span_needed = net_width + total_overlap
+        effective_span_available = net_width + total_overlap
 
-        width_ok = effective_span_needed >= door_span
+        width_ok = effective_span_available >= door_span
         height_ok = (height - height_stack_base) >= door_h
 
-        issue = "✅ OK" if (width_ok and height_ok) else "🔴 Check"
+        issue = "✅ OK" if (width_ok and height_ok and net_width > 0) else "🔴 Check"
 
         return pd.Series({
             "Door_Height_mm": int(round(door_h)),
@@ -288,6 +293,8 @@ def calculate(row):
             "Side_Left_mm": round(side_left, 1),
             "Side_Right_mm": round(side_right, 1),
             "Net_Width_mm": int(round(net_width)),
+            "Overlap_Per_Meeting_mm": int(overlap_per_meeting),
+            "Overlaps_Count": int(overlaps_count(doors)),
             "Total_Overlap_mm": int(round(total_overlap)),
             "Door_Span_mm": int(round(door_span)),
             "Issue": issue,
@@ -297,10 +304,12 @@ def calculate(row):
     # MADE TO MEASURE DOORS
     # --------------------------
     dropdown_h = min(hb_dropdown, MAX_DROPDOWN_LIMIT)
+
     raw_door_h = height - height_stack_base - dropdown_h
     door_h = max(min(raw_door_h, MAX_DOOR_HEIGHT), 0)
 
     door_w = (net_width + total_overlap) / doors if doors else 0
+
     issue = "✅ OK" if (net_width > 0 and door_h > 0) else "🔴 Check"
 
     return pd.Series({
@@ -311,6 +320,8 @@ def calculate(row):
         "Side_Left_mm": round(side_left, 1),
         "Side_Right_mm": round(side_right, 1),
         "Net_Width_mm": int(round(net_width)),
+        "Overlap_Per_Meeting_mm": int(overlap_per_meeting),
+        "Overlaps_Count": int(overlaps_count(doors)),
         "Total_Overlap_mm": int(round(total_overlap)),
         "Door_Span_mm": int(round(net_width + total_overlap)),
         "Issue": issue,
@@ -348,26 +359,29 @@ side_right = float(row.get("Side_Right_mm", 0))
 end_panel = bool(row.get("End_Panel", False))
 end_panel_side = row.get("End_Panel_Side", "Left")
 
-# Installer-friendly, plain-English banner
+# Installer-friendly banner (plain English)
 if door_system == "Made to measure doors":
     if hb in ["Story", "Strata", "Jones Homes"]:
         if end_panel:
+            # one side 18mm, other side 68mm
+            ep_side = end_panel_side.lower()
             msg = f"""
-            • Dropdown is fixed at <b>50mm</b> for this client<br>
-            • Build-out is <b>68mm</b> on one side (50mm T-liner + 18mm side liner) and <b>18mm</b> on the <b>{end_panel_side.lower()}</b> side (end panel)<br>
+            • Dropdown is fixed at <b>50mm</b><br>
+            • One side is <b>18mm</b> (end panel on the <b>{ep_side}</b> side)<br>
+            • The other side is <b>68mm</b> (50mm T-liner + 18mm side liner)<br>
             • Doors are made-to-measure to suit what remains after dropdown and liners<br><br>
             <b>Do not alter the dropdown or the build-out on site</b>
             """
         else:
-            msg = f"""
-            • Dropdown is fixed at <b>50mm</b> for this client<br>
+            msg = """
+            • Dropdown is fixed at <b>50mm</b><br>
             • Build-out is <b>68mm per side</b> (50mm T-liner + 18mm side liner)<br>
             • Doors are made-to-measure to suit what remains after dropdown and liners<br><br>
             <b>Do not alter the dropdown or the build-out on site</b>
             """
     else:
         msg = f"""
-        • Dropdown is fixed at <b>{dropdown}mm</b> for this client<br>
+        • Dropdown is fixed at <b>{dropdown}mm</b><br>
         • Fit <b>standard 18mm side liners</b> each side<br>
         • Doors are made-to-measure to suit the net opening<br><br>
         <b>Do not change the dropdown height</b>
@@ -382,8 +396,14 @@ else:
 
 st.markdown(
     f"""
-    <div style="border:2px solid #1f2937; background:#f9fafb;
-                padding:16px; border-radius:10px; font-size:16px; margin-bottom:14px;">
+    <div style="
+        border:2px solid #1f2937;
+        background:#f9fafb;
+        padding:16px;
+        border-radius:10px;
+        font-size:16px;
+        margin-bottom:14px;
+    ">
         {msg}
     </div>
     """,
@@ -424,5 +444,7 @@ with col2:
     st.write(f"**Dropdown height:** {int(row.get('Dropdown_Height_mm', 0))} mm")
     st.write(f"**Side liners/build-out:** {side_left}mm (left), {side_right}mm (right)")
     st.write(f"**Net width:** {int(row.get('Net_Width_mm', 0))} mm")
+    st.write(f"**Overlap per meeting:** {int(row.get('Overlap_Per_Meeting_mm', 0))} mm")
+    st.write(f"**Overlaps count:** {int(row.get('Overlaps_Count', 0))}")
     st.write(f"**Total overlap applied:** {int(row.get('Total_Overlap_mm', 0))} mm")
     st.caption(f"Height stack includes bottom liner ({BOTTOM_LINER_THICKNESS}mm) + trackset ({TRACKSET_HEIGHT}mm).")

@@ -35,10 +35,10 @@ st.header("Wardrobe Door & Liner Calculator")
 # CONSTANTS
 # ============================================================
 BOTTOM_LINER_THICKNESS = 36
-TRACKSET_HEIGHT = 54  # (your live build includes this in the stack)
+TRACKSET_HEIGHT = 54
 BASE_SIDE_LINER_THICKNESS = 18
 
-MIN_T_LINER_THICKNESS = 50  # if build-out > 18, T-liner is at least 50mm
+MIN_T_LINER_THICKNESS = 50
 
 MAX_DOOR_HEIGHT = 2500
 MAX_DROPDOWN_LIMIT = 400
@@ -59,7 +59,6 @@ HOUSEBUILDER_RULES = {
 }
 HOUSEBUILDER_OPTIONS = list(HOUSEBUILDER_RULES.keys())
 
-# MTM overlap per meeting: your door-style variation (this replaces the old fixed 25mm-per-meeting)
 DOOR_STYLE_OVERLAP = {
     "Classic": 35,
     "Shaker": 75,
@@ -68,15 +67,16 @@ DOOR_STYLE_OVERLAP = {
 }
 DOOR_STYLE_OPTIONS = list(DOOR_STYLE_OVERLAP.keys())
 
-# Only these housebuilders use the fixed-door-width solver + fixed width UI
 FIXED_WIDTH_HOUSEBUILDERS = {"Avant", "Homes By Honey"}
+
+# Dropdown selection options (user choice + "Auto")
+DROPDOWN_SELECT_OPTIONS = ["Auto", "0", "50", "90", "108"]
 
 
 # ============================================================
 # HELPERS
 # ============================================================
 def overlaps_count(num_doors: int) -> int:
-    """Meeting overlaps count. Keeps your rule: 2->1, 3/4->2, 5->4, else n-1."""
     n = max(int(num_doors), 1)
     if n == 2:
         return 1
@@ -88,25 +88,30 @@ def overlaps_count(num_doors: int) -> int:
 
 
 def fixed_overlap_total(num_doors: int) -> int:
-    """Original fixed-door tolerance overlap bucket (PDF): 2 doors=75, 3+=150."""
     return 75 if int(num_doors) == 2 else 150
 
 
 def normalized_door_system(val: str) -> str:
-    """Default blank to MTM for safety."""
     if val is None:
         return "Made to measure doors"
     v = str(val).strip()
     return "Made to measure doors" if v == "" else v
 
 
+def parse_dropdown_select(val) -> tuple[bool, int]:
+    """Returns: (is_auto, dropdown_mm)."""
+    if val is None:
+        return True, 0
+    s = str(val).strip()
+    if s.lower().startswith("auto") or s == "":
+        return True, 0
+    try:
+        return False, int(float(s))
+    except Exception:
+        return True, 0
+
+
 def apply_t_liner_rule(total_per_side_needed: float) -> tuple[float, float]:
-    """
-    Input total build-out per side required (including the 18mm side liner).
-    Output: (total_per_side, t_liner_thickness)
-      - If <=18 => (18, 0)
-      - Else t = max(total-18, 50), total=18+t
-    """
     total_per_side_needed = float(total_per_side_needed)
     if total_per_side_needed <= BASE_SIDE_LINER_THICKNESS:
         return float(BASE_SIDE_LINER_THICKNESS), 0.0
@@ -143,22 +148,13 @@ def solve_buildout_for_fixed(width_mm: float,
     """
     Fixed system:
       coverage = door_span - total_overlap
-      net_width = width - left_total - right_total
-
-    Target "centred / perfect fit":
-      net_width == coverage
-    => left_total + right_total == width - coverage == width + total_overlap - door_span
-
-    Keeps your rules:
-      - End panels: 2 => 18/18, 1 => left 18 fixed, right takes remainder
-      - Locked totals (Story/Strata/Jones): force both sides if no end panels
-      - T-liner rule: if >18, extra is at least 50mm
+      Target net_width == coverage
+      => left_total + right_total = width - coverage
     """
     width_mm = float(width_mm)
     coverage = float(door_span_mm) - float(total_overlap_mm)
-    total_buildout_required = width_mm - coverage  # == width + overlap - span
+    total_buildout_required = width_mm - coverage
 
-    # End panels override
     if end_panels >= 2:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
@@ -166,7 +162,6 @@ def solve_buildout_for_fixed(width_mm: float,
         ok = coverage >= net_width
         return left_total, right_total, left_t, right_t, ("OK" if ok else "Opening too wide (needs more build-out)")
 
-    # Locked totals override (only if no end panels)
     if locked_total_per_side is not None and end_panels == 0:
         left_total = right_total = float(locked_total_per_side)
         left_t = right_t = max(left_total - 18.0, 0.0)
@@ -174,8 +169,6 @@ def solve_buildout_for_fixed(width_mm: float,
         ok = coverage >= net_width
         return left_total, right_total, left_t, right_t, ("OK" if ok else "Opening too wide (locked build-out)")
 
-    # Minimum is 18mm per side (36 combined)
-    # If required <= 36, just do 18/18 and you'll have extra coverage (fine)
     if total_buildout_required <= 36.0:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
@@ -192,7 +185,6 @@ def solve_buildout_for_fixed(width_mm: float,
         ok = coverage >= net_width
         return left_total, right_total, left_t, right_t, ("OK" if ok else "Opening too wide (needs more build-out)")
 
-    # No end panels: split evenly + T-liner rule
     per_side_needed = total_buildout_required / 2.0
     left_total, left_t = apply_t_liner_rule(per_side_needed)
     right_total, right_t = apply_t_liner_rule(per_side_needed)
@@ -271,6 +263,7 @@ EMPTY_ROW = pd.DataFrame([{
     "Housebuilder": "Non-client specific wardrobe",
     "Door_System": "",
     "Door_Style": "Classic",
+    "Dropdown_Select": "Auto",
     "Fixed_Door_Width_mm": 762,
     "End_Panels": 0,
 }])
@@ -293,7 +286,6 @@ if "openings_seed" not in st.session_state:
 st.subheader("1. Enter opening")
 st.button("Reset opening", on_click=reset_inputs)
 
-# Determine HB selection for conditional column display
 hb_selected = st.session_state["openings_seed"].iloc[0].get("Housebuilder", "Non-client specific wardrobe")
 if "openings_table" in st.session_state and isinstance(st.session_state["openings_table"], pd.DataFrame):
     hb_selected = st.session_state["openings_table"].iloc[0].get("Housebuilder", hb_selected)
@@ -307,6 +299,7 @@ base_column_config = {
     "Housebuilder": st.column_config.SelectboxColumn("Housebuilder", options=HOUSEBUILDER_OPTIONS),
     "Door_System": st.column_config.SelectboxColumn("Door system", options=DOOR_SYSTEM_OPTIONS),
     "Door_Style": st.column_config.SelectboxColumn("Door style", options=DOOR_STYLE_OPTIONS),
+    "Dropdown_Select": st.column_config.SelectboxColumn("Dropdown type (mm)", options=DROPDOWN_SELECT_OPTIONS),
     "End_Panels": st.column_config.SelectboxColumn("End panels (count)", options=[0, 1, 2]),
 }
 
@@ -324,7 +317,6 @@ edited_df = st.data_editor(
     column_config=base_column_config,
 )
 
-# Rerun if HB changed so the fixed width column appears/disappears immediately
 new_hb = edited_df.iloc[0].get("Housebuilder", hb_selected)
 if "prev_hb" not in st.session_state:
     st.session_state["prev_hb"] = new_hb
@@ -341,20 +333,32 @@ if pd.isna(row_in.get("Width_mm")) or pd.isna(row_in.get("Height_mm")):
 # CALCULATION
 # ============================================================
 def calculate(row: pd.Series) -> pd.Series:
+    warnings: list[str] = []
+    errors: list[str] = []
+
     width = float(row["Width_mm"])
     height = float(row["Height_mm"])
     doors = int(row.get("Doors", 2))
 
     hb = row.get("Housebuilder", "Non-client specific wardrobe")
     hb_rule = HOUSEBUILDER_RULES.get(hb, HOUSEBUILDER_RULES["Non-client specific wardrobe"])
-    hb_dropdown_rule = int(hb_rule["dropdown"])
+    hb_required_dropdown = int(hb_rule["dropdown"])
     locked_total = hb_rule.get("locked_total_per_side")
 
     end_panels = int(row.get("End_Panels", 0) or 0)
     door_style = row.get("Door_Style", "Classic")
 
-    height_stack = BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT
     door_system = normalized_door_system(row.get("Door_System", ""))
+    height_stack = BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT
+
+    # --------------------------
+    # Dropdown: user choice + validation (always)
+    # --------------------------
+    is_auto, user_dd = parse_dropdown_select(row.get("Dropdown_Select", "Auto"))
+    dropdown_type_status = "OK"
+    if not is_auto and user_dd != hb_required_dropdown:
+        dropdown_type_status = f"Housebuilder expects {hb_required_dropdown}mm dropdown (selected {user_dd}mm)"
+        warnings.append(dropdown_type_status)
 
     # ========================================================
     # BLOOR: guidance-only
@@ -362,6 +366,8 @@ def calculate(row: pd.Series) -> pd.Series:
     if hb == "Bloor":
         left_total = right_total = 18.0
         net_width = width - left_total - right_total
+        # still show dropdown mismatch warnings if user picked wrong type
+        issue = "🔴 Check" if warnings or errors else "ℹ️ Refer to floor plan"
         return pd.Series({
             "Mode": "Bloor guidance",
             "Door_System_Resolved": "Fixed 2223mm doors",
@@ -369,6 +375,7 @@ def calculate(row: pd.Series) -> pd.Series:
             "Door_Width_mm": "",
             "Doors_Used": doors,
             "Dropdown_Height_mm": 108,
+            "Dropdown_Type_Status": dropdown_type_status,
             "Side_Left_Total_mm": left_total,
             "Side_Right_Total_mm": right_total,
             "T_Liner_Left_mm": "",
@@ -380,7 +387,9 @@ def calculate(row: pd.Series) -> pd.Series:
             "Coverage_mm": "",
             "Width_Status": "",
             "Height_Status": "",
-            "Issue": "ℹ️ Refer to floor plan",
+            "Warnings": " | ".join(warnings),
+            "Errors": " | ".join(errors),
+            "Issue": issue,
         })
 
     # ========================================================
@@ -389,17 +398,17 @@ def calculate(row: pd.Series) -> pd.Series:
     use_fixed_solver = (hb in FIXED_WIDTH_HOUSEBUILDERS) and (door_system == "Fixed 2223mm doors")
 
     if use_fixed_solver:
-        # Original fixed overlap tolerance bucket (PDF): 75 or 150 :contentReference[oaicite:3]{index=3}
         total_overlap = fixed_overlap_total(doors)
-
         door_h = FIXED_DOOR_HEIGHT
+
         door_w = float(row.get("Fixed_Door_Width_mm", 762))
         if int(door_w) not in FIXED_DOOR_WIDTH_OPTIONS:
             door_w = 762
+            warnings.append("Fixed door width not recognised – defaulted to 762mm.")
 
         door_span = doors * door_w
 
-        left_total, right_total, left_t, right_t, width_status = solve_buildout_for_fixed(
+        left_total, right_total, left_t, right_t, _ = solve_buildout_for_fixed(
             width_mm=width,
             door_span_mm=door_span,
             total_overlap_mm=total_overlap,
@@ -410,19 +419,26 @@ def calculate(row: pd.Series) -> pd.Series:
         net_width = width - left_total - right_total
         coverage = door_span - total_overlap
         diff = coverage - net_width
-        width_status = "OK" if diff >= 0 else f"Opening too wide by {int(round(-diff))}mm"
+
+        if diff < 0:
+            errors.append(f"Opening too wide by {int(round(-diff))}mm – increase build-out or change doors.")
+            width_status = "Opening too wide"
+        else:
+            width_status = "OK"
 
         dropdown_raw = height - height_stack - door_h
         dropdown_h = max(dropdown_raw, 0.0)
+
         height_status = "OK"
+        if (height - height_stack) < door_h:
+            errors.append("Opening too small (height) for fixed door + bottom liner + trackset.")
+            height_status = "Opening too small (height)"
+
         if dropdown_raw > MAX_DROPDOWN_LIMIT:
             dropdown_h = float(MAX_DROPDOWN_LIMIT)
-            height_status = "Dropdown would exceed 400mm (cap applied) – check opening"
+            warnings.append("Dropdown would exceed 400mm (cap applied) – check opening height vs fixed door.")
 
-        if (height - height_stack) < door_h:
-            height_status = "Opening too small (height) for fixed door + bottom liner + trackset"
-
-        issue = "✅ OK" if (width_status == "OK" and height_status == "OK") else "🔴 Check"
+        issue = "🔴 Check" if errors or warnings else "✅ OK"
 
         return pd.Series({
             "Mode": "Fixed (Avant/HBH only)",
@@ -430,7 +446,8 @@ def calculate(row: pd.Series) -> pd.Series:
             "Door_Height_mm": int(round(door_h)),
             "Door_Width_mm": int(round(door_w)),
             "Doors_Used": doors,
-            "Dropdown_Height_mm": int(round(dropdown_h)),
+            "Dropdown_Height_mm": int(round(dropdown_h)),  # fixed still calculated as remainder
+            "Dropdown_Type_Status": dropdown_type_status,
             "Side_Left_Total_mm": round(left_total, 1),
             "Side_Right_Total_mm": round(right_total, 1),
             "T_Liner_Left_mm": round(left_t, 1),
@@ -442,20 +459,21 @@ def calculate(row: pd.Series) -> pd.Series:
             "Coverage_mm": int(round(coverage)),
             "Width_Status": width_status,
             "Height_Status": height_status,
+            "Warnings": " | ".join(warnings),
+            "Errors": " | ".join(errors),
             "Issue": issue,
         })
 
     # ========================================================
-    # DEFAULT: CUSTOM / MTM (everyone else, and Avant/HBH if not selecting Fixed 2223)
+    # DEFAULT: MADE TO MEASURE (everyone else)
     # ========================================================
-    overlap_per_meeting = int(DOOR_STYLE_OVERLAP.get(door_style, 25))  # PDF default is 25 per meeting :contentReference[oaicite:4]{index=4}
+    overlap_per_meeting = int(DOOR_STYLE_OVERLAP.get(door_style, 25))
     total_overlap = overlaps_count(doors) * overlap_per_meeting
 
-    dropdown_h = min(hb_dropdown_rule, MAX_DROPDOWN_LIMIT)
+    # Dropdown used in MTM:
+    dropdown_h = hb_required_dropdown if is_auto else user_dd
+    dropdown_h = max(0, min(int(dropdown_h), MAX_DROPDOWN_LIMIT))
 
-    # side totals for MTM:
-    # - locked clients get locked totals if no end panels
-    # - otherwise 18/18 (end panels don't change thickness beyond 18; it's wording/assumption)
     if locked_total is not None and end_panels == 0:
         left_total = right_total = float(locked_total)
         left_t = right_t = max(left_total - 18.0, 0.0)
@@ -463,7 +481,6 @@ def calculate(row: pd.Series) -> pd.Series:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
 
-    # End panels: still 18mm per side physically (but message changes)
     if end_panels >= 2:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
@@ -475,14 +492,28 @@ def calculate(row: pd.Series) -> pd.Series:
 
     raw_door_h = height - height_stack - dropdown_h
     door_h = max(min(raw_door_h, MAX_DOOR_HEIGHT), 0)
+
+    if net_width <= 0:
+        errors.append("Opening too small (width) after side deductions.")
+
+    if door_h <= 0:
+        errors.append("Opening too small (height) after bottom/track/dropdown deductions.")
+
     door_w = (net_width + total_overlap) / doors if doors else 0
 
     door_span = doors * door_w
-    coverage = door_span - total_overlap  # should ~= net_width (rounding)
+    coverage = door_span - total_overlap
+
+    # sanity check: coverage should ~= net_width
+    if net_width > 0:
+        delta = coverage - net_width
+        if abs(delta) > 2:  # rounding tolerance
+            warnings.append(f"Coverage mismatch vs net width by {int(round(delta))}mm (rounding/inputs).")
 
     width_status = "OK" if net_width > 0 else "Opening too small (width)"
     height_status = "OK" if door_h > 0 else "Opening too small (height)"
-    issue = "✅ OK" if (width_status == "OK" and height_status == "OK") else "🔴 Check"
+
+    issue = "🔴 Check" if errors or warnings else "✅ OK"
 
     return pd.Series({
         "Mode": "Made to measure",
@@ -491,6 +522,7 @@ def calculate(row: pd.Series) -> pd.Series:
         "Door_Width_mm": int(round(door_w)),
         "Doors_Used": doors,
         "Dropdown_Height_mm": int(round(dropdown_h)),
+        "Dropdown_Type_Status": dropdown_type_status,
         "Side_Left_Total_mm": round(left_total, 1),
         "Side_Right_Total_mm": round(right_total, 1),
         "T_Liner_Left_mm": round(left_t, 1),
@@ -502,6 +534,8 @@ def calculate(row: pd.Series) -> pd.Series:
         "Coverage_mm": int(round(coverage)),
         "Width_Status": width_status,
         "Height_Status": height_status,
+        "Warnings": " | ".join(warnings),
+        "Errors": " | ".join(errors),
         "Issue": issue,
     })
 
@@ -520,12 +554,25 @@ csv = results.to_csv(index=False).encode("utf-8")
 st.download_button("Download CSV", csv, "wardrobe_results.csv", "text/csv")
 
 # ============================================================
-# 3. VISUALISE OPENING
+# 3. VISUALISE OPENING + ON-SCREEN WARNINGS
 # ============================================================
 st.subheader("3. Visualise opening")
 
 row = results.iloc[0]
 hb = row["Housebuilder"]
+
+# On-screen warnings/errors (always show when present)
+if str(row.get("Errors", "")).strip():
+    # split on our separator so they render nicely
+    for msg in str(row["Errors"]).split(" | "):
+        if msg.strip():
+            st.error(msg.strip())
+
+if str(row.get("Warnings", "")).strip():
+    for msg in str(row["Warnings"]).split(" | "):
+        if msg.strip():
+            st.warning(msg.strip())
+
 door_mode = row.get("Mode", "")
 door_system = row.get("Door_System_Resolved", normalized_door_system(row.get("Door_System", "")))
 door_style = row.get("Door_Style", "Classic")
@@ -541,11 +588,7 @@ if hb == "Bloor":
 **Bloor specification – follow Field Aware floor plan**
 
 This job is **Bloor**. The final opening width/height and any build-out needed must be taken from the
-**client floor plan in Field Aware** to make the wardrobe product work with the aperture.
-
-- **Door height is fixed at 2223mm**
-- **Dropdown is fixed at 108mm**
-- **Do not rely on calculated spans or overlap maths for Bloor — use the Field Aware floor plan as the source of truth.**
+**client floor plan in Field Aware**.
 """
     )
 else:
@@ -557,6 +600,7 @@ else:
 - Door system: **{door_system}**
 - Door style: **{door_style}**
 - Dropdown applied: **{dropdown}mm**
+- Dropdown type check: **{row.get("Dropdown_Type_Status","")}**
 - Side build-out: **{row.get("Side_Description","")}**
 """
     )
@@ -588,14 +632,13 @@ with col2:
     st.write("---")
     st.write(f"**Doors:** {doors_used}")
     st.write(f"**Door height:** {int(row.get('Door_Height_mm', FIXED_DOOR_HEIGHT))} mm")
-
     if hb == "Bloor":
         st.write("**Door width (each):** Refer to floor plan")
     else:
         st.write(f"**Door width (each):** {row.get('Door_Width_mm', 0)} mm")
-
     st.write("---")
     st.write(f"**Dropdown height:** {dropdown} mm")
+    st.write(f"**Dropdown type status:** {row.get('Dropdown_Type_Status','')}")
     st.write(f"**Side build-out totals:** {left_total}mm (left), {right_total}mm (right)")
     st.write(f"**T-liners:** L {row.get('T_Liner_Left_mm','')}mm | R {row.get('T_Liner_Right_mm','')}mm")
     st.write("---")

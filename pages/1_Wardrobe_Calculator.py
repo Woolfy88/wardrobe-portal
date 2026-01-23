@@ -219,45 +219,8 @@ def solve_buildout_for_fixed(
     return left_total, right_total, left_t, right_t, ("OK" if ok else "Opening too wide (needs more build-out)")
 
 
-def render_fixings_blurb(housebuilder: str, side_left_total: float | None, side_right_total: float | None):
-    st.markdown("### 🔩 Suitable fixings (installer to confirm on site)")
-    st.markdown(
-        """
-- **Confirm substrate** before fixing (timber studs, metal studs, masonry, pattressing).
-- Use **appropriate fixings** for the substrate:
-  - Timber studs: structural wood screws into studs
-  - Metal studs: self-drilling metal fixings / rivnuts as appropriate
-  - Masonry: correct plugs/anchors + screw type/length
-- **Do not rely on plasterboard alone** as a structural fixing point.
-- If additional **noggins/pattressing** are required to achieve secure fixing, this must be provided/installed as needed (unless noted on drawings/spec).
-- Ensure fixings **do not foul services** (cables/pipes) and follow site safe systems of work.
-"""
-    )
-
-    # Helpful extra prompt when build-out is large
-    try:
-        lt = float(side_left_total) if side_left_total is not None else 0.0
-        rt = float(side_right_total) if side_right_total is not None else 0.0
-        max_side = max(lt, rt)
-        if max_side >= 68:
-            st.info(
-                "Build-out is **larger than a standard 18mm side liner**. Double-check fixing length, "
-                "and ensure you still achieve a solid structural fixing behind the build-out."
-            )
-    except Exception:
-        pass
-
-    if housebuilder in {"Avant", "Homes By Honey"}:
-        st.info("For **Avant / Homes By Honey**, align fixing positions with the client specification and site drawings.")
-    if housebuilder == "Bloor":
-        st.warning(
-            "For **Bloor**, fixing locations and build-out requirements must be taken from the **Field Aware floor plan**. "
-            "Do not rely on standard assumptions."
-        )
-
-
 # ============================================================
-# DIAGRAM (with annotations + arrows)
+# DIAGRAM (minimal annotations only: opening W/H + dropdown)
 # ============================================================
 def draw_wardrobe_diagram(
     opening_width_mm,
@@ -283,24 +246,28 @@ def draw_wardrobe_diagram(
     door_h_rel = min(door_h_rel, usable_h_rel)
 
     fig, ax = plt.subplots(figsize=(5, 7))
-    ax.set_xlim(-0.55, 1.55)
-    ax.set_ylim(-0.30, 1.20)
+    ax.set_xlim(-0.35, 1.35)
+    ax.set_ylim(-0.25, 1.15)
     ax.axis("off")
     ax.set_aspect("equal")
 
     # Opening outline
     ax.add_patch(Rectangle((0, 0), 1, 1, fill=False, lw=2))
 
-    # Build-out + bottom liner (shaded)
-    ax.add_patch(Rectangle((0, bottom_rel), left_rel, 1 - bottom_rel, alpha=0.25))
-    ax.add_patch(Rectangle((1 - right_rel, bottom_rel), right_rel, 1 - bottom_rel, alpha=0.25))
-    ax.add_patch(Rectangle((left_rel, 0), 1 - left_rel - right_rel, bottom_rel, alpha=0.25))
+    # Light shading for context only
+    ax.add_patch(Rectangle((0, bottom_rel), left_rel, 1 - bottom_rel, alpha=0.15))
+    ax.add_patch(Rectangle((1 - right_rel, bottom_rel), right_rel, 1 - bottom_rel, alpha=0.15))
+    ax.add_patch(Rectangle((left_rel, 0), 1 - left_rel - right_rel, bottom_rel, alpha=0.15))
 
-    # Dropdown (shaded)
     if dropdown_rel:
-        ax.add_patch(Rectangle((left_rel, 1 - dropdown_rel), 1 - left_rel - right_rel, dropdown_rel, alpha=0.25))
+        ax.add_patch(Rectangle(
+            (left_rel, 1 - dropdown_rel),
+            1 - left_rel - right_rel,
+            dropdown_rel,
+            alpha=0.15
+        ))
 
-    # Doors (dashed)
+    # Doors (dashed, no dimensions)
     num_doors = max(int(num_doors), 1)
     span = max(1 - left_rel - right_rel, 0)
 
@@ -314,10 +281,10 @@ def draw_wardrobe_diagram(
 
     x = left_rel
     for _ in range(num_doors):
-        ax.add_patch(Rectangle((x, bottom_rel), door_w_rel, door_h_rel, fill=False, linestyle="--", lw=1.5))
+        ax.add_patch(Rectangle((x, bottom_rel), door_w_rel, door_h_rel, fill=False, linestyle="--", lw=1.2))
         x += door_w_rel
 
-    # ---------- Dimensions ----------
+    # Minimal dimensions
     def dim_h(x0, x1, y, text):
         ax.annotate("", xy=(x0, y), xytext=(x1, y), arrowprops=dict(arrowstyle="<->", lw=1.4))
         ax.text((x0 + x1) / 2, y + 0.02, text, ha="center", va="bottom", fontsize=9)
@@ -327,36 +294,10 @@ def draw_wardrobe_diagram(
         ax.text(x + 0.02, (y0 + y1) / 2, text, ha="left", va="center", rotation=90, fontsize=9)
 
     dim_h(0, 1, -0.12, f"Opening width: {int(round(ow))}mm")
-    dim_v(-0.20, 0, 1, f"Opening height: {int(round(oh))}mm")
-
-    if left_rel > 0:
-        dim_h(0, left_rel, 1.06, f"Left build-out: {int(round(side_left_mm))}mm")
-    if right_rel > 0:
-        dim_h(1 - right_rel, 1, 1.06, f"Right build-out: {int(round(side_right_mm))}mm")
-
-    if bottom_rel > 0:
-        dim_v(1.08, 0, bottom_rel, f"Bottom liner: {int(round(bottom_thk_mm))}mm")
+    dim_v(-0.18, 0, 1, f"Opening height: {int(round(oh))}mm")
 
     if dropdown_rel > 0:
         dim_v(1.08, 1 - dropdown_rel, 1, f"Dropdown: {int(round(dropdown_height_mm))}mm")
-
-    if door_h_rel > 0:
-        dim_v(1.22, bottom_rel, bottom_rel + door_h_rel, f"Door height: {int(round(door_height_mm))}mm")
-
-    if door_width_mm and float(door_width_mm) > 0:
-        door_w_label = int(round(float(door_width_mm)))
-    else:
-        door_w_label = int(round((door_w_rel * ow)))
-
-    if door_w_rel > 0 and span > 0:
-        dim_h(left_rel, min(left_rel + door_w_rel, 1 - right_rel), 0.98, f"Door width (each): {door_w_label}mm")
-
-    # Labels
-    ax.text(left_rel / 2 if left_rel else 0.02, 0.65, "Build-out", ha="center", va="center", fontsize=8)
-    ax.text(1 - right_rel / 2 if right_rel else 0.98, 0.65, "Build-out", ha="center", va="center", fontsize=8)
-    ax.text(0.5, bottom_rel / 2 if bottom_rel else 0.02, "Bottom liner", ha="center", va="center", fontsize=8)
-    if dropdown_rel:
-        ax.text(0.5, 1 - dropdown_rel / 2, "Dropdown", ha="center", va="center", fontsize=8)
 
     return fig
 
@@ -595,7 +536,7 @@ def calculate(row: pd.Series) -> pd.Series:
     if net_width <= 0:
         errors.append("Opening too small (width) after side deductions.")
 
-    raw_door_h = height - height_stack - dropdown_h
+    raw_door_h = height - (BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT) - dropdown_h
     door_h = max(min(raw_door_h, MAX_DOOR_HEIGHT), 0)
     if door_h <= 0:
         errors.append("Opening too small (height) after bottom/track/dropdown deductions.")
@@ -722,7 +663,6 @@ fig = draw_wardrobe_diagram(
 col1, col2 = st.columns([2, 1])
 with col1:
     st.pyplot(fig)
-    render_fixings_blurb(hb, row.get("Side_Left_Total_mm", None), row.get("Side_Right_Total_mm", None))
 
 with col2:
     st.markdown("#### Summary")

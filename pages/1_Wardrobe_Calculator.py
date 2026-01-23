@@ -67,6 +67,8 @@ DOOR_STYLE_OVERLAP = {
 }
 DOOR_STYLE_OPTIONS = list(DOOR_STYLE_OVERLAP.keys())
 
+FIXED_WIDTH_HOUSEBUILDERS = {"Avant", "Homes By Honey"}  # <-- only these use fixed door width logic
+
 
 # ============================================================
 # HELPERS
@@ -84,9 +86,9 @@ def overlaps_count(num_doors: int) -> int:
 
 def normalized_door_system(val: str) -> str:
     if val is None:
-        return "Fixed 2223mm doors"
+        return "Made to measure doors"
     v = str(val).strip()
-    return "Fixed 2223mm doors" if v == "" else v
+    return "Made to measure doors" if v == "" else v
 
 
 def apply_t_liner_rule(total_per_side_needed: float) -> tuple[float, float]:
@@ -116,7 +118,6 @@ def side_desc(left_total, right_total, left_t, right_t, end_panels: int) -> str:
     if end_panels >= 2:
         return "2x end panels (18mm each side)"
     if end_panels == 1:
-        # assume end panel is LEFT for wording consistency
         if abs(left_total - 18.0) < 0.01 and abs(left_t) < 0.01:
             return f"Left: 18mm end panel | Right: {fmt_side(right_total, right_t)}"
         if abs(right_total - 18.0) < 0.01 and abs(right_t) < 0.01:
@@ -125,8 +126,13 @@ def side_desc(left_total, right_total, left_t, right_t, end_panels: int) -> str:
     return f"Left: {fmt_side(left_total, left_t)} | Right: {fmt_side(right_total, right_t)}"
 
 
-def solve_buildout_for_fixed(width_mm: float, door_span_mm: float, total_overlap_mm: float,
-                            end_panels: int, locked_total_per_side: float | None):
+def solve_buildout_for_fixed(
+    width_mm: float,
+    door_span_mm: float,
+    total_overlap_mm: float,
+    end_panels: int,
+    locked_total_per_side: float | None,
+):
     """
     Solve required build-out totals so:
       net_width + total_overlap == door_span
@@ -143,7 +149,6 @@ def solve_buildout_for_fixed(width_mm: float, door_span_mm: float, total_overlap
     """
     width_mm = float(width_mm)
 
-    # end panels hard override
     if end_panels >= 2:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
@@ -152,7 +157,6 @@ def solve_buildout_for_fixed(width_mm: float, door_span_mm: float, total_overlap
         status = "OK" if ok else "Opening too small for chosen fixed doors"
         return left_total, right_total, left_t, right_t, status
 
-    # locked client build-out
     if locked_total_per_side is not None and end_panels == 0:
         left_total = right_total = float(locked_total_per_side)
         left_t = right_t = max(left_total - 18.0, 0.0)
@@ -163,7 +167,6 @@ def solve_buildout_for_fixed(width_mm: float, door_span_mm: float, total_overlap
 
     total_buildout_required = (width_mm + total_overlap_mm) - door_span_mm
 
-    # Minimum combined build-out is 36 (18+18) unless you have end panels (still 36)
     if total_buildout_required < 36:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
@@ -257,9 +260,10 @@ EMPTY_ROW = pd.DataFrame([{
 
 
 def reset_inputs():
-    # Reset safely: delete widget state so Streamlit rebuilds from the seed DF
     if "openings_table" in st.session_state:
         del st.session_state["openings_table"]
+    if "prev_hb" in st.session_state:
+        del st.session_state["prev_hb"]
     st.session_state["openings_seed"] = EMPTY_ROW.copy()
 
 
@@ -272,29 +276,44 @@ if "openings_seed" not in st.session_state:
 st.subheader("1. Enter opening")
 st.button("Reset opening", on_click=reset_inputs)
 
-# IMPORTANT:
-# Always feed a REAL DataFrame (seed) into data_editor.
-# Never feed st.session_state["openings_table"] back into data_editor.
+# Determine current HB selection (for conditional column display)
+hb_selected = st.session_state["openings_seed"].iloc[0].get("Housebuilder", "Non-client specific wardrobe")
+if "openings_table" in st.session_state and isinstance(st.session_state["openings_table"], pd.DataFrame):
+    hb_selected = st.session_state["openings_table"].iloc[0].get("Housebuilder", hb_selected)
+
+show_fixed_width = hb_selected in FIXED_WIDTH_HOUSEBUILDERS
+
+base_column_config = {
+    "Width_mm": st.column_config.NumberColumn("Width (mm)", min_value=300, step=10),
+    "Height_mm": st.column_config.NumberColumn("Height (mm)", min_value=300, step=10),
+    "Doors": st.column_config.NumberColumn("Doors", min_value=2, max_value=10, step=1),
+    "Housebuilder": st.column_config.SelectboxColumn("Housebuilder", options=HOUSEBUILDER_OPTIONS),
+    "Door_System": st.column_config.SelectboxColumn("Door system", options=DOOR_SYSTEM_OPTIONS),
+    "Door_Style": st.column_config.SelectboxColumn("Door style", options=DOOR_STYLE_OPTIONS),
+    "End_Panels": st.column_config.SelectboxColumn("End panels (count)", options=[0, 1, 2]),
+}
+
+if show_fixed_width:
+    base_column_config["Fixed_Door_Width_mm"] = st.column_config.SelectboxColumn(
+        "Fixed door width (Avant/Homes By Honey only)",
+        options=FIXED_DOOR_WIDTH_OPTIONS,
+    )
+
 edited_df = st.data_editor(
     st.session_state["openings_seed"],
     num_rows="fixed",
     key="openings_table",
     use_container_width=True,
-    column_config={
-        "Width_mm": st.column_config.NumberColumn("Width (mm)", min_value=300, step=10),
-        "Height_mm": st.column_config.NumberColumn("Height (mm)", min_value=300, step=10),
-        "Doors": st.column_config.NumberColumn("Doors", min_value=2, max_value=10, step=1),
-        "Housebuilder": st.column_config.SelectboxColumn("Housebuilder", options=HOUSEBUILDER_OPTIONS),
-        "Door_System": st.column_config.SelectboxColumn("Door system", options=DOOR_SYSTEM_OPTIONS),
-        "Door_Style": st.column_config.SelectboxColumn("Door style", options=DOOR_STYLE_OPTIONS),
-        "Fixed_Door_Width_mm": st.column_config.SelectboxColumn(
-            "Fixed door width (fixed only)",
-            options=FIXED_DOOR_WIDTH_OPTIONS,
-            default=762,
-        ),
-        "End_Panels": st.column_config.SelectboxColumn("End panels (count)", options=[0, 1, 2], default=0),
-    },
+    column_config=base_column_config,
 )
+
+# Rerun if HB changed so the fixed width column appears/disappears immediately
+new_hb = edited_df.iloc[0].get("Housebuilder", hb_selected)
+if "prev_hb" not in st.session_state:
+    st.session_state["prev_hb"] = new_hb
+elif new_hb != st.session_state["prev_hb"]:
+    st.session_state["prev_hb"] = new_hb
+    st.rerun()
 
 row_in = edited_df.iloc[0]
 if pd.isna(row_in.get("Width_mm")) or pd.isna(row_in.get("Height_mm")):
@@ -349,8 +368,10 @@ def calculate(row: pd.Series) -> pd.Series:
             "Issue": "ℹ️ Refer to floor plan",
         })
 
-    # FIXED: solve build-out to make doors fit aperture
-    if door_system == "Fixed 2223mm doors":
+    # ========================================================
+    # FIXED DOOR WIDTH MODE (ONLY for Avant / Homes By Honey)
+    # ========================================================
+    if hb in FIXED_WIDTH_HOUSEBUILDERS:
         door_h = FIXED_DOOR_HEIGHT
         door_w = float(row.get("Fixed_Door_Width_mm", 762))
         if int(door_w) not in FIXED_DOOR_WIDTH_OPTIONS:
@@ -379,7 +400,7 @@ def calculate(row: pd.Series) -> pd.Series:
         issue = "✅ OK" if (width_status == "OK" and height_status == "OK") else "🔴 Check"
 
         return pd.Series({
-            "Door_System_Resolved": door_system,
+            "Door_System_Resolved": "Fixed 2223mm doors (Avant/HBH)",
             "Door_Height_mm": int(round(door_h)),
             "Door_Width_mm": int(round(door_w)),
             "Doors_Used": doors,
@@ -399,7 +420,9 @@ def calculate(row: pd.Series) -> pd.Series:
             "Issue": issue,
         })
 
-    # MADE TO MEASURE
+    # ========================================================
+    # DEFAULT MODE: MADE TO MEASURE (and other housebuilders)
+    # ========================================================
     dropdown_h = min(hb_dropdown_rule, MAX_DROPDOWN_LIMIT)
 
     # side totals for MTM: locked clients get locked totals; otherwise 18/18 (end panels override)
@@ -409,7 +432,6 @@ def calculate(row: pd.Series) -> pd.Series:
     else:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
-
         if end_panels >= 2:
             left_total = right_total = 18.0
         elif end_panels == 1:
@@ -426,7 +448,7 @@ def calculate(row: pd.Series) -> pd.Series:
     issue = "✅ OK" if (width_status == "OK" and height_status == "OK") else "🔴 Check"
 
     return pd.Series({
-        "Door_System_Resolved": door_system,
+        "Door_System_Resolved": "Made to measure doors",
         "Door_Height_mm": int(round(door_h)),
         "Door_Width_mm": int(round(door_w)),
         "Doors_Used": doors,
@@ -497,7 +519,7 @@ else:
         f"""
 **Installer guidance**
 
-- Door system: **{door_system}**
+- Door mode: **{door_system}**
 - Door style: **{door_style}**
 - Dropdown applied: **{dropdown}mm**
 - Side build-out: **{row.get("Side_Description","")}**
@@ -523,17 +545,21 @@ with col1:
 with col2:
     st.markdown("#### Summary")
     st.write(f"**Housebuilder:** {hb}")
-    st.write(f"**Door system:** {door_system}")
+    st.write(f"**Door mode:** {door_system}")
     st.write(f"**Door style:** {door_style}")
     st.write(f"**End panels:** {int(row.get('End_Panels', 0) or 0)}")
     st.write(f"**Issue:** {row.get('Issue','—')}")
     st.write("---")
     st.write(f"**Doors:** {doors_used}")
     st.write(f"**Door height:** {int(row.get('Door_Height_mm', FIXED_DOOR_HEIGHT))} mm")
-    if hb == "Bloor":
+
+    if hb in FIXED_WIDTH_HOUSEBUILDERS:
+        st.write(f"**Door width (each):** {row.get('Door_Width_mm', 0)} mm (fixed)")
+    elif hb == "Bloor":
         st.write("**Door width (each):** Refer to floor plan")
     else:
-        st.write(f"**Door width (each):** {row.get('Door_Width_mm', 0)} mm")
+        st.write(f"**Door width (each):** {row.get('Door_Width_mm', 0)} mm (MTM calc)")
+
     st.write("---")
     st.write(f"**Dropdown height:** {dropdown} mm")
     st.write(f"**Side build-out totals:** {left_total}mm (left), {right_total}mm (right)")

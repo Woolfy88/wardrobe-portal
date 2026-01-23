@@ -48,17 +48,11 @@ FIXED_DOOR_WIDTH_OPTIONS = [610, 762, 914]
 
 DOOR_SYSTEM_OPTIONS = ["", "Fixed 2223mm doors", "Made to measure doors"]
 
-# ============================================================
-# HOUSEBUILDER RULES
-# locked_total_per_side:
-#   - None => not locked (we can solve build-out for Fixed door system)
-#   - 68 => locked at 68mm total per side (18 + 50)
-# ============================================================
 HOUSEBUILDER_RULES = {
     "Non-client specific wardrobe": {"dropdown": 0, "locked_total_per_side": None},
     "Avant": {"dropdown": 90, "locked_total_per_side": None},
     "Homes By Honey": {"dropdown": 90, "locked_total_per_side": None},
-    "Bloor": {"dropdown": 108, "locked_total_per_side": None},  # handled specially (guidance only)
+    "Bloor": {"dropdown": 108, "locked_total_per_side": None},  # guidance-only
     "Story": {"dropdown": 50, "locked_total_per_side": 68},
     "Strata": {"dropdown": 50, "locked_total_per_side": 68},
     "Jones Homes": {"dropdown": 50, "locked_total_per_side": 68},
@@ -74,6 +68,9 @@ DOOR_STYLE_OVERLAP = {
 DOOR_STYLE_OPTIONS = list(DOOR_STYLE_OVERLAP.keys())
 
 
+# ============================================================
+# HELPERS
+# ============================================================
 def overlaps_count(num_doors: int) -> int:
     n = max(int(num_doors), 1)
     if n == 2:
@@ -94,10 +91,10 @@ def normalized_door_system(val: str) -> str:
 
 def apply_t_liner_rule(total_per_side_needed: float) -> tuple[float, float]:
     """
-    Input: total build-out per side required (including the 18mm side liner)
-    Output:
-      total_per_side (>=18)
-      t_liner (0 if total==18 else >=50 and ensures total is met)
+    Input total build-out per side required (including the 18mm side liner).
+    Output: (total_per_side, t_liner_thickness)
+      - If <=18 => (18, 0)
+      - Else t = max(total-18, 50), total=18+t
     """
     total_per_side_needed = float(total_per_side_needed)
     if total_per_side_needed <= BASE_SIDE_LINER_THICKNESS:
@@ -109,40 +106,40 @@ def apply_t_liner_rule(total_per_side_needed: float) -> tuple[float, float]:
     return float(total), float(t)
 
 
-def side_desc(left_total, right_total, left_t, right_t, end_panels: int) -> str:
-    def fmt(total, t):
-        if t <= 0:
-            return f"{int(total)}mm (18mm side liner)"
-        return f"{int(total)}mm (18 + {int(t)} T-liner)"
+def fmt_side(total: float, t: float) -> str:
+    if t <= 0:
+        return f"{int(round(total))}mm (18mm side liner)"
+    return f"{int(round(total))}mm (18 + {int(round(t))} T-liner)"
 
+
+def side_desc(left_total, right_total, left_t, right_t, end_panels: int) -> str:
     if end_panels >= 2:
         return "2x end panels (18mm each side)"
     if end_panels == 1:
-        # assume end panel shown on LEFT for consistent wording
-        if left_total == 18 and right_total != 18:
-            return f"Left: 18mm end panel | Right: {fmt(right_total, right_t)}"
-        if right_total == 18 and left_total != 18:
-            return f"Left: {fmt(left_total, left_t)} | Right: 18mm end panel"
-        return f"1x end panel | Left: {fmt(left_total, left_t)} | Right: {fmt(right_total, right_t)}"
+        # assume end panel is LEFT for wording consistency
+        if abs(left_total - 18.0) < 0.01 and abs(left_t) < 0.01:
+            return f"Left: 18mm end panel | Right: {fmt_side(right_total, right_t)}"
+        if abs(right_total - 18.0) < 0.01 and abs(right_t) < 0.01:
+            return f"Left: {fmt_side(left_total, left_t)} | Right: 18mm end panel"
+        return f"1x end panel | Left: {fmt_side(left_total, left_t)} | Right: {fmt_side(right_total, right_t)}"
+    return f"Left: {fmt_side(left_total, left_t)} | Right: {fmt_side(right_total, right_t)}"
 
-    return f"Left: {fmt(left_total, left_t)} | Right: {fmt(right_total, right_t)}"
 
-
-def solve_buildout_for_fixed(width_mm: float, door_span_mm: float, total_overlap_mm: float, end_panels: int,
-                            locked_total_per_side: float | None):
+def solve_buildout_for_fixed(width_mm: float, door_span_mm: float, total_overlap_mm: float,
+                            end_panels: int, locked_total_per_side: float | None):
     """
-    For fixed doors we SOLVE the required build-out per side so:
+    Solve required build-out totals so:
       net_width + total_overlap == door_span
       net_width = width - left_total - right_total
     => left_total + right_total = width + total_overlap - door_span
 
     End panels:
-      - 2: left=18 right=18 (locked)
-      - 1: left=18, right takes remainder (with T-liner rule)
-      - 0: split evenly (with T-liner rule)
+      - 2 => 18/18 fixed
+      - 1 => left 18 fixed, right takes remainder (T-liner rule applies)
+      - 0 => split evenly (T-liner rule applies)
 
-    Locked clients:
-      - if locked_total_per_side is set and no end panels: force both sides to locked value
+    Locked:
+      - if locked_total_per_side is set and end_panels==0 => force both sides to locked
     """
     width_mm = float(width_mm)
 
@@ -155,7 +152,7 @@ def solve_buildout_for_fixed(width_mm: float, door_span_mm: float, total_overlap
         status = "OK" if ok else "Opening too small for chosen fixed doors"
         return left_total, right_total, left_t, right_t, status
 
-    # locked client build-out (only if no end panels)
+    # locked client build-out
     if locked_total_per_side is not None and end_panels == 0:
         left_total = right_total = float(locked_total_per_side)
         left_t = right_t = max(left_total - 18.0, 0.0)
@@ -166,24 +163,23 @@ def solve_buildout_for_fixed(width_mm: float, door_span_mm: float, total_overlap
 
     total_buildout_required = (width_mm + total_overlap_mm) - door_span_mm
 
-    if total_buildout_required < 36:  # minimum is 18+18 if no end panels
-        # opening too small; clamp at minimum so diagram still works
+    # Minimum combined build-out is 36 (18+18) unless you have end panels (still 36)
+    if total_buildout_required < 36:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
         return left_total, right_total, left_t, right_t, "Opening too small for chosen fixed doors + overlaps"
 
     if end_panels == 1:
-        # left is end panel 18, right takes remainder
         left_total = 18.0
         left_t = 0.0
-        right_needed = total_buildout_required - left_total
+        right_needed = max(total_buildout_required - left_total, 18.0)
         right_total, right_t = apply_t_liner_rule(right_needed)
         return left_total, right_total, left_t, right_t, "OK"
-    else:
-        per_side_needed = total_buildout_required / 2.0
-        left_total, left_t = apply_t_liner_rule(per_side_needed)
-        right_total, right_t = apply_t_liner_rule(per_side_needed)
-        return left_total, right_total, left_t, right_t, "OK"
+
+    per_side_needed = total_buildout_required / 2.0
+    left_total, left_t = apply_t_liner_rule(per_side_needed)
+    right_total, right_t = apply_t_liner_rule(per_side_needed)
+    return left_total, right_total, left_t, right_t, "OK"
 
 
 # ============================================================
@@ -219,7 +215,6 @@ def draw_wardrobe_diagram(
     ax.set_aspect("equal")
 
     ax.add_patch(Rectangle((0, 0), 1, 1, fill=False, lw=2))
-
     ax.add_patch(Rectangle((0, bottom_rel), left_rel, 1 - bottom_rel, alpha=0.25))
     ax.add_patch(Rectangle((1 - right_rel, bottom_rel), right_rel, 1 - bottom_rel, alpha=0.25))
     ax.add_patch(Rectangle((left_rel, 0), 1 - left_rel - right_rel, bottom_rel, alpha=0.25))
@@ -230,7 +225,6 @@ def draw_wardrobe_diagram(
     num_doors = max(int(num_doors), 1)
     span = max(1 - left_rel - right_rel, 0)
 
-    # If door_width_mm is 0 => draw equally for visuals (Bloor)
     if door_width_mm and float(door_width_mm) > 0:
         door_w_rel = float(door_width_mm) / ow
         total = num_doors * door_w_rel
@@ -263,7 +257,7 @@ EMPTY_ROW = pd.DataFrame([{
 
 
 def reset_inputs():
-    # Reset by removing the widget state key (prevents blanking issues)
+    # Reset safely: delete widget state so Streamlit rebuilds from the seed DF
     if "openings_table" in st.session_state:
         del st.session_state["openings_table"]
     st.session_state["openings_seed"] = EMPTY_ROW.copy()
@@ -278,12 +272,11 @@ if "openings_seed" not in st.session_state:
 st.subheader("1. Enter opening")
 st.button("Reset opening", on_click=reset_inputs)
 
-# IMPORTANT: DO NOT write back into session_state for the editor every rerun.
-# The widget key ("openings_table") holds the current value.
-seed_df = st.session_state.get("openings_table", st.session_state["openings_seed"])
-
+# IMPORTANT:
+# Always feed a REAL DataFrame (seed) into data_editor.
+# Never feed st.session_state["openings_table"] back into data_editor.
 edited_df = st.data_editor(
-    seed_df,
+    st.session_state["openings_seed"],
     num_rows="fixed",
     key="openings_table",
     use_container_width=True,
@@ -333,7 +326,6 @@ def calculate(row: pd.Series) -> pd.Series:
 
     # BLOOR: guidance-only
     if hb == "Bloor":
-        # keep a simple 18/18 visual; no sizing math for doors or overlaps/spans
         left_total = right_total = 18.0
         net_width = width - left_total - right_total
         return pd.Series({
@@ -357,14 +349,12 @@ def calculate(row: pd.Series) -> pd.Series:
             "Issue": "ℹ️ Refer to floor plan",
         })
 
-    # FIXED DOORS: solve build-out (T-liner min 50 if required)
+    # FIXED: solve build-out to make doors fit aperture
     if door_system == "Fixed 2223mm doors":
         door_h = FIXED_DOOR_HEIGHT
-
         door_w = float(row.get("Fixed_Door_Width_mm", 762))
         if int(door_w) not in FIXED_DOOR_WIDTH_OPTIONS:
             door_w = 762
-
         door_span = doors * door_w
 
         left_total, right_total, left_t, right_t, width_status = solve_buildout_for_fixed(
@@ -409,24 +399,21 @@ def calculate(row: pd.Series) -> pd.Series:
             "Issue": issue,
         })
 
-    # MADE TO MEASURE:
-    # - dropdown from client rule (0 for non-client specific)
-    # - side totals: locked clients get locked totals; otherwise assume 18/18 (end panels override)
+    # MADE TO MEASURE
     dropdown_h = min(hb_dropdown_rule, MAX_DROPDOWN_LIMIT)
 
+    # side totals for MTM: locked clients get locked totals; otherwise 18/18 (end panels override)
     if locked_total is not None and end_panels == 0:
         left_total = right_total = float(locked_total)
         left_t = right_t = max(left_total - 18.0, 0.0)
     else:
+        left_total = right_total = 18.0
+        left_t = right_t = 0.0
+
         if end_panels >= 2:
             left_total = right_total = 18.0
-            left_t = right_t = 0.0
         elif end_panels == 1:
             left_total = right_total = 18.0
-            left_t = right_t = 0.0
-        else:
-            left_total = right_total = 18.0
-            left_t = right_t = 0.0
 
     net_width = width - left_total - right_total
 
@@ -488,7 +475,6 @@ dropdown = int(row.get("Dropdown_Height_mm", 0))
 left_total = float(row.get("Side_Left_Total_mm", 18))
 right_total = float(row.get("Side_Right_Total_mm", 18))
 
-# Plain-English banner
 if hb == "Bloor":
     st.markdown(
         """
@@ -539,6 +525,7 @@ with col2:
     st.write(f"**Housebuilder:** {hb}")
     st.write(f"**Door system:** {door_system}")
     st.write(f"**Door style:** {door_style}")
+    st.write(f"**End panels:** {int(row.get('End_Panels', 0) or 0)}")
     st.write(f"**Issue:** {row.get('Issue','—')}")
     st.write("---")
     st.write(f"**Doors:** {doors_used}")

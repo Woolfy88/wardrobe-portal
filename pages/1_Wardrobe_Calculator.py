@@ -52,7 +52,6 @@ HOUSEBUILDER_RULES = {
 }
 HOUSEBUILDER_OPTIONS = list(HOUSEBUILDER_RULES.keys())
 
-# Door style overlap per meeting (MTM)
 DOOR_STYLE_OVERLAP = {
     "Classic": 35,
     "Shaker": 75,
@@ -61,8 +60,9 @@ DOOR_STYLE_OVERLAP = {
 }
 DOOR_STYLE_OPTIONS = list(DOOR_STYLE_OVERLAP.keys())
 
-# Dropdown selection options (user choice + "Auto")
 DROPDOWN_SELECT_OPTIONS = ["Auto", "0", "18", "50", "90", "108"]
+
+FLOORPLAN_ONLY_HOUSEBUILDERS = {"Avant", "Homes By Honey"}  # no calculated outputs shown
 
 
 # ============================================================
@@ -80,7 +80,6 @@ def overlaps_count(num_doors: int) -> int:
 
 
 def parse_dropdown_select(val) -> tuple[bool, int]:
-    """Returns (is_auto, dropdown_mm)."""
     if val is None:
         return True, 0
     s = str(val).strip()
@@ -142,23 +141,17 @@ def draw_wardrobe_diagram(
     ax.axis("off")
     ax.set_aspect("equal")
 
-    # Opening outline
     ax.add_patch(Rectangle((0, 0), 1, 1, fill=False, lw=2))
 
-    # Light shading for context only
+    # context shading only
     ax.add_patch(Rectangle((0, bottom_rel), left_rel, 1 - bottom_rel, alpha=0.15))
     ax.add_patch(Rectangle((1 - right_rel, bottom_rel), right_rel, 1 - bottom_rel, alpha=0.15))
     ax.add_patch(Rectangle((left_rel, 0), 1 - left_rel - right_rel, bottom_rel, alpha=0.15))
 
     if dropdown_rel:
-        ax.add_patch(Rectangle(
-            (left_rel, 1 - dropdown_rel),
-            1 - left_rel - right_rel,
-            dropdown_rel,
-            alpha=0.15
-        ))
+        ax.add_patch(Rectangle((left_rel, 1 - dropdown_rel), 1 - left_rel - right_rel, dropdown_rel, alpha=0.15))
 
-    # Doors (dashed, no dimensions)
+    # doors (dashed)
     num_doors = max(int(num_doors), 1)
     span = max(1 - left_rel - right_rel, 0)
 
@@ -175,7 +168,7 @@ def draw_wardrobe_diagram(
         ax.add_patch(Rectangle((x, bottom_rel), door_w_rel, door_h_rel, fill=False, linestyle="--", lw=1.2))
         x += door_w_rel
 
-    # Minimal dimensions
+    # minimal dimensions
     def dim_h(x0, x1, y, text):
         ax.annotate("", xy=(x0, y), xytext=(x1, y), arrowprops=dict(arrowstyle="<->", lw=1.4))
         ax.text((x0 + x1) / 2, y + 0.02, text, ha="center", va="bottom", fontsize=9)
@@ -269,13 +262,10 @@ def calculate(row: pd.Series) -> pd.Series:
         dropdown_type_status = f"Housebuilder expects {hb_required_dropdown}mm dropdown (selected {user_dd}mm)"
         warnings.append(dropdown_type_status)
 
-    # Applied dropdown height:
     dropdown_h = hb_required_dropdown if is_auto else user_dd
     dropdown_h = max(0, min(int(dropdown_h), MAX_DROPDOWN_LIMIT))
 
     # Side build-out totals:
-    # - Default: 18/18
-    # - Locked clients (Story/Strata/Jones): 68/68 if no end panels
     if locked_total is not None and end_panels == 0:
         left_total = right_total = float(locked_total)
         left_t = right_t = max(left_total - 18.0, 0.0)
@@ -283,11 +273,8 @@ def calculate(row: pd.Series) -> pd.Series:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
 
-    # End panels are always 18mm each side in this view
-    if end_panels >= 2:
-        left_total = right_total = 18.0
-        left_t = right_t = 0.0
-    elif end_panels == 1:
+    # End panels simplified view (always 18/18 each side)
+    if end_panels >= 1:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
 
@@ -295,23 +282,19 @@ def calculate(row: pd.Series) -> pd.Series:
     if net_width <= 0:
         errors.append("Opening too small (width) after side deductions.")
 
-    # Overlaps
     overlap_per_meeting = int(DOOR_STYLE_OVERLAP.get(door_style, 25))
     total_overlap = overlaps_count(doors) * overlap_per_meeting
 
-    # Height: 36 bottom liner + 54 trackset + dropdown selection
     height_stack = BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT  # 36 + 54
     raw_door_h = height - height_stack - dropdown_h
     door_h = max(min(raw_door_h, MAX_DOOR_HEIGHT), 0)
     if door_h <= 0:
         errors.append("Opening too small (height) after bottom/track/dropdown deductions.")
 
-    # Door width
     door_w = (net_width + total_overlap) / doors if doors else 0
     door_span = doors * door_w
     coverage = door_span - total_overlap
 
-    # Sanity check: coverage ~= net_width (within rounding tolerance)
     if net_width > 0:
         delta = coverage - net_width
         if abs(delta) > 2:
@@ -360,14 +343,14 @@ csv = results.to_csv(index=False).encode("utf-8")
 st.download_button("Download CSV", csv, "wardrobe_results.csv", "text/csv")
 
 # ============================================================
-# 3. VISUALISE OPENING + ON-SCREEN WARNINGS + BANNERS
+# 3. VISUALISE OPENING + BANNERS
 # ============================================================
 st.subheader("3. Visualise opening")
 
 row = results.iloc[0]
 hb = row["Housebuilder"]
 
-# Banners (like Bloor) for specific clients
+# Bloor banner
 if hb == "Bloor":
     st.markdown(
         """
@@ -380,6 +363,7 @@ This job is **Bloor**. The final opening width/height and any build-out needed m
 """
     )
 
+# Avant / Homes By Honey banner
 if hb in {"Avant", "Homes By Honey"}:
     st.markdown(
         """
@@ -394,47 +378,45 @@ The final sizes, build-out, and fitting approach must be taken from the **client
 """
     )
 
-# On-screen warnings/errors
-errs = str(row.get("Errors", "")).strip()
-warns = str(row.get("Warnings", "")).strip()
+# If floorplan-only client: DO NOT show calculated warnings/results that could conflict
+floorplan_only = hb in FLOORPLAN_ONLY_HOUSEBUILDERS
 
-if errs:
-    for msg in errs.split(" | "):
-        if msg.strip():
-            st.error(msg.strip())
+if not floorplan_only:
+    errs = str(row.get("Errors", "")).strip()
+    warns = str(row.get("Warnings", "")).strip()
 
-if warns:
-    for msg in warns.split(" | "):
-        if msg.strip():
-            st.warning(msg.strip())
+    if errs:
+        for msg in errs.split(" | "):
+            if msg.strip():
+                st.error(msg.strip())
+
+    if warns:
+        for msg in warns.split(" | "):
+            if msg.strip():
+                st.warning(msg.strip())
 
 door_style = row.get("Door_Style", "Classic")
 doors_used = int(row.get("Doors_Used", 2))
 dropdown = int(row.get("Dropdown_Height_mm", 0))
+
 left_total = float(row.get("Side_Left_Total_mm", 18))
 right_total = float(row.get("Side_Right_Total_mm", 18))
 
-st.markdown(
-    f"""
-**Installer guidance (calculated)**
-
-- Door style: **{door_style}**
-- Doors: **{doors_used}**
-- Dropdown applied: **{dropdown}mm**
-- Side build-out: **{row.get("Side_Description","")}**
-"""
-)
+# For floorplan-only clients, keep the diagram honest/neutral:
+# show 18mm side liners (36mm total) as generic context shading (not implying their true build-out)
+diagram_left = 18.0 if floorplan_only else left_total
+diagram_right = 18.0 if floorplan_only else right_total
 
 fig = draw_wardrobe_diagram(
     opening_width_mm=row["Width_mm"],
     opening_height_mm=row["Height_mm"],
     bottom_thk_mm=BOTTOM_LINER_THICKNESS,
-    side_left_mm=left_total,
-    side_right_mm=right_total,
+    side_left_mm=diagram_left,
+    side_right_mm=diagram_right,
     dropdown_height_mm=dropdown,
-    door_height_mm=row.get("Door_Height_mm", 0),
+    door_height_mm=0 if floorplan_only else row.get("Door_Height_mm", 0),
     num_doors=doors_used,
-    door_width_mm=row.get("Door_Width_mm", 0),
+    door_width_mm=0 if floorplan_only else row.get("Door_Width_mm", 0),
 )
 
 col1, col2 = st.columns([2, 1])
@@ -445,18 +427,20 @@ with col2:
     st.markdown("#### Summary")
     st.write(f"**Housebuilder:** {hb}")
     st.write(f"**Door style:** {door_style}")
-    st.write(f"**End panels:** {int(row.get('End_Panels', 0) or 0)}")
-    st.write(f"**Issue:** {row.get('Issue','—')}")
-    st.write("---")
     st.write(f"**Doors:** {doors_used}")
-    st.write(f"**Door height:** {int(row.get('Door_Height_mm', 0))} mm")
-    st.write(f"**Door width (each):** {row.get('Door_Width_mm', 0)} mm")
+    st.write(f"**Dropdown applied:** {dropdown} mm")
     st.write("---")
-    st.write(f"**Dropdown height:** {dropdown} mm")
-    st.write(f"**Dropdown type status:** {row.get('Dropdown_Type_Status','')}")
-    st.write("---")
-    st.write(f"**Net opening width:** {row.get('Net_Width_mm','—')} mm")
-    st.write(f"**Total overlap:** {row.get('Total_Overlap_mm','—')} mm")
+
+    if floorplan_only:
+        st.info("Calculated door sizes are hidden for this client. Use the Field Aware floor plan for sizes and fit.")
+    else:
+        st.write(f"**Door height:** {int(row.get('Door_Height_mm', 0))} mm")
+        st.write(f"**Door width (each):** {row.get('Door_Width_mm', 0)} mm")
+        st.write("---")
+        st.write(f"**Side build-out:** {row.get('Side_Description','')}")
+        st.write(f"**Net opening width:** {row.get('Net_Width_mm','—')} mm")
+        st.write(f"**Total overlap:** {row.get('Total_Overlap_mm','—')} mm")
+
     st.caption(
         f"Height deductions: bottom liner ({BOTTOM_LINER_THICKNESS}mm) + trackset tolerance ({TRACKSET_HEIGHT}mm) + dropdown."
     )

@@ -160,7 +160,6 @@ def draw_wardrobe_diagram(
     num_doors = max(int(num_doors), 1)
     span = max(1 - left_rel - right_rel, 0)
 
-    # Visual door width scaling (avoid extending beyond opening)
     door_width_mm = max(float(door_width_mm or 0), 0.0)
     if door_width_mm > 0:
         door_w_rel = door_width_mm / ow
@@ -193,11 +192,10 @@ def draw_wardrobe_diagram(
         dim_v(1.08, 1 - dropdown_rel, 1, f"Dropdown: {int(round(dropdown_height_mm))}mm")
 
     # ============================================================
-    # FIXING NOTES (as requested)
+    # FIXING NOTES
     # ============================================================
     note_box = dict(boxstyle="round,pad=0.45", fc="white", ec="black", lw=1)
 
-    # TOP LINER / DROP-DOWN FIXING NOTE (with arrow) - only if dropdown exists
     if dropdown_rel > 0:
         ax.annotate(
             "Drop-down to be fixed using\n"
@@ -213,7 +211,6 @@ def draw_wardrobe_diagram(
             arrowprops=dict(arrowstyle="->", lw=1.3),
         )
 
-    # SIDE LINER FIXING NOTE (LEFT) – NO ARROW
     ax.annotate(
         "Side liners fixings -\n"
         "200mm in from either end\n"
@@ -228,7 +225,6 @@ def draw_wardrobe_diagram(
         bbox=note_box,
     )
 
-    # BOTTOM LINER / SUB-CILL FIXING NOTE – NO ARROW
     ax.annotate(
         "Sub-cill to floor - fixing every 500mm\n"
         "Sub-cill to carpet - fixing every 200mm",
@@ -240,7 +236,6 @@ def draw_wardrobe_diagram(
         bbox=note_box,
     )
 
-    # BOTTOM TRACK FIXING NOTE (with arrow)
     ax.annotate(
         "Bottom track fixing - 50-80mm in from ends\n"
         "and then every 800mm of track span.",
@@ -307,7 +302,7 @@ if pd.isna(row_in.get("Width_mm")) or pd.isna(row_in.get("Height_mm")):
     st.stop()
 
 # ============================================================
-# CALCULATION (still computed for CSV/table, but display is blocked for floorplan-only)
+# CALCULATION
 # ============================================================
 def calculate(row: pd.Series) -> pd.Series:
     warnings: list[str] = []
@@ -325,14 +320,24 @@ def calculate(row: pd.Series) -> pd.Series:
     end_panels = int(row.get("End_Panels", 0) or 0)
     door_style = row.get("Door_Style", "Classic")
 
-    # Dropdown selection + check
+    # Dropdown selection
     is_auto, user_dd = parse_dropdown_select(row.get("Dropdown_Select", "Auto"))
-    dropdown_type_status = "OK"
-    if not is_auto and user_dd != hb_required_dropdown:
-        dropdown_type_status = f"Housebuilder expects {hb_required_dropdown}mm dropdown (selected {user_dd}mm)"
-        warnings.append(dropdown_type_status)
 
-    dropdown_h = hb_required_dropdown if is_auto else user_dd
+    # ---- KEY CHANGE:
+    # For Non-client specific wardrobe, there is NO "expected dropdown" check.
+    # Just use whatever is selected. Auto defaults to 0.
+    dropdown_type_status = "OK"
+    if hb != "Non-client specific wardrobe":
+        if not is_auto and user_dd != hb_required_dropdown:
+            dropdown_type_status = f"Housebuilder expects {hb_required_dropdown}mm dropdown (selected {user_dd}mm)"
+            warnings.append(dropdown_type_status)
+
+    # Applied dropdown:
+    if hb == "Non-client specific wardrobe":
+        dropdown_h = 0 if is_auto else user_dd
+    else:
+        dropdown_h = hb_required_dropdown if is_auto else user_dd
+
     dropdown_h = max(0, min(int(dropdown_h), MAX_DROPDOWN_LIMIT))
 
     # Side build-out totals:
@@ -355,7 +360,6 @@ def calculate(row: pd.Series) -> pd.Series:
     overlap_per_meeting = int(DOOR_STYLE_OVERLAP.get(door_style, 25))
     total_overlap = overlaps_count(doors) * overlap_per_meeting
 
-    # Height deductions: 36 bottom liner + 54 trackset + dropdown selection
     height_stack = BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT
     raw_door_h = height - height_stack - dropdown_h
     door_h = max(min(raw_door_h, MAX_DOOR_HEIGHT), 0)
@@ -422,7 +426,6 @@ row = results.iloc[0]
 hb = row["Housebuilder"]
 floorplan_only = hb in FLOORPLAN_ONLY_HOUSEBUILDERS
 
-# Always-visible note (all clients)
 st.info(f"Trackset height: **{TRACKSET_HEIGHT}mm** | Fixed sized door height: **{FIXED_SIZED_DOOR_HEIGHT}mm**")
 
 if hb == "Bloor":
@@ -451,7 +454,7 @@ The final sizes, build-out, and fitting approach must be taken from the **client
 """
     )
 
-# Only show on-screen calculation warnings/errors for non-floorplan clients
+# Only show warnings/errors for non-floorplan clients
 if not floorplan_only:
     errs = str(row.get("Errors", "")).strip()
     warns = str(row.get("Warnings", "")).strip()
@@ -473,11 +476,9 @@ dropdown = int(row.get("Dropdown_Height_mm", 0))
 left_total = float(row.get("Side_Left_Total_mm", 18))
 right_total = float(row.get("Side_Right_Total_mm", 18))
 
-# Keep diagram neutral for floorplan-only clients
 diagram_left = 18.0 if floorplan_only else left_total
 diagram_right = 18.0 if floorplan_only else right_total
 
-# For floorplan-only clients: keep door dims neutral, but still draw dashed doors for context
 door_h_for_diagram = 0 if floorplan_only else row.get("Door_Height_mm", 0)
 door_w_for_diagram = 0 if floorplan_only else row.get("Door_Width_mm", 0)
 

@@ -8,21 +8,21 @@ from PIL import Image, ImageOps
 st.set_page_config(page_title="Woodwork Colour Checker", layout="wide")
 
 st.title("Woodwork Colour Checker")
-st.caption("Take a photo (or upload one). The tool estimates the dominant colour and matches it to your internal colour names.")
+st.caption(
+    "Take a photo (or upload one). This tool estimates the dominant colour and "
+    "matches it to your internal product colour names."
+)
 
 # ============================================================
-# YOUR COLOUR PALETTE (start with 1 and grow to 8–10)
-# Put YOUR internal names here.
+# COLOUR PALETTE (YOUR INTERNAL NAMES + RGB)
 # ============================================================
 PALETTE = [
-    {"name": "Warm Oak", "rgb": (185, 145, 95)},  # <-- replace with your first photo-derived RGB
-    # Add more later:
-    # {"name": "Light Oak", "rgb": (205, 176, 130)},
-    # {"name": "White", "rgb": (245, 245, 245)},
+    {"name": "Onyx",        "rgb": (78, 84, 82)},
+    {"name": "Pebble Grey", "rgb": (156, 156, 156)},
 ]
 
 # ============================================================
-# COLOUR SPACE HELPERS (RGB -> Lab for better perceptual matching)
+# COLOUR SPACE HELPERS (RGB -> Lab for perceptual matching)
 # ============================================================
 def _srgb_to_linear(c):
     c = c / 255.0
@@ -31,14 +31,13 @@ def _srgb_to_linear(c):
 def rgb_to_xyz(rgb):
     rgb = np.array(rgb, dtype=np.float32)
     r, g, b = _srgb_to_linear(rgb)
-    # sRGB D65
     x = r * 0.4124564 + g * 0.3575761 + b * 0.1804375
     y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750
     z = r * 0.0193339 + g * 0.1191920 + b * 0.9503041
     return np.array([x, y, z], dtype=np.float32)
 
 def xyz_to_lab(xyz):
-    ref = np.array([0.95047, 1.00000, 1.08883], dtype=np.float32)  # D65 white
+    ref = np.array([0.95047, 1.00000, 1.08883], dtype=np.float32)
     xyz = xyz / ref
 
     def f(t):
@@ -54,12 +53,12 @@ def xyz_to_lab(xyz):
 def rgb_to_lab(rgb):
     return xyz_to_lab(rgb_to_xyz(rgb))
 
-# Precompute palette in Lab
+# Precompute palette in Lab space
 for p in PALETTE:
     p["lab"] = rgb_to_lab(p["rgb"])
 
 # ============================================================
-# K-MEANS (dominant colour extraction)
+# DOMINANT COLOUR EXTRACTION (k-means)
 # ============================================================
 def kmeans_dominant_rgb(pixels_rgb, k=3, iters=12, seed=42):
     rng = np.random.default_rng(seed)
@@ -79,7 +78,6 @@ def kmeans_dominant_rgb(pixels_rgb, k=3, iters=12, seed=42):
         new_centers = np.vstack(new_centers)
 
         if np.allclose(centers, new_centers, atol=0.5):
-            centers = new_centers
             break
         centers = new_centers
 
@@ -87,6 +85,7 @@ def kmeans_dominant_rgb(pixels_rgb, k=3, iters=12, seed=42):
     labels = np.argmin(dists, axis=1)
     counts = np.bincount(labels, minlength=len(centers))
     dom = np.argmax(counts)
+
     return centers[dom], counts[dom] / counts.sum()
 
 def clamp_rgb(rgb):
@@ -107,8 +106,7 @@ def prep_pixels(img: Image.Image, max_side=520, ignore_glare=True):
 
     if ignore_glare:
         brightness = arr.mean(axis=1)
-        keep = brightness < 245
-        arr = arr[keep] if keep.any() else arr
+        arr = arr[brightness < 245]
 
     return arr, img
 
@@ -119,13 +117,17 @@ def match_palette(dominant_rgb):
     for p in PALETTE:
         dist = float(np.linalg.norm(dom_lab - p["lab"]))
         rows.append((p["name"], p["rgb"], dist))
+
     rows.sort(key=lambda x: x[2])
 
     def dist_to_score(d):
-        # heuristic scaling; tweak later if you want
         return float(np.clip(1.0 - (d / 35.0), 0.0, 1.0))
 
-    top = [{"name": n, "rgb": rgb, "dist": d, "score": dist_to_score(d)} for n, rgb, d in rows[:5]]
+    top = [
+        {"name": n, "rgb": rgb, "dist": d, "score": dist_to_score(d)}
+        for n, rgb, d in rows[:5]
+    ]
+
     return top[0], top
 
 def confidence_label(score):
@@ -143,28 +145,34 @@ left, right = st.columns([1.15, 1])
 with left:
     st.subheader("1) Take / upload photo")
 
-    cam = st.camera_input("Use camera (mobile)", help="Take a close-up of the woodwork/finish. Avoid glare if possible.")
-    up = st.file_uploader("Or upload a photo", type=["jpg", "jpeg", "png", "webp"])
+    cam = st.camera_input(
+        "Use camera (mobile)",
+        help="Take a close-up of the product surface. Avoid glare if possible."
+    )
+    up = st.file_uploader(
+        "Or upload a photo",
+        type=["jpg", "jpeg", "png", "webp"]
+    )
 
-    ignore_glare = st.toggle("Ignore bright reflections (recommended)", value=True)
-
-    st.markdown("**Optional: focus crop** (use if lots of background is confusing it)")
-    c1, c2, c3, c4 = st.columns(4)
-    crop_x = c1.number_input("x", min_value=0, value=0, step=10)
-    crop_y = c2.number_input("y", min_value=0, value=0, step=10)
-    crop_w = c3.number_input("w", min_value=0, value=0, step=10, help="0 = no crop")
-    crop_h = c4.number_input("h", min_value=0, value=0, step=10, help="0 = no crop")
+    ignore_glare = st.toggle(
+        "Ignore bright reflections (recommended)",
+        value=True
+    )
 
 with right:
-    st.subheader("Palette reference")
-    sw_cols = st.columns(5)
+    st.subheader("Colour reference")
+    cols = st.columns(len(PALETTE))
     for i, p in enumerate(PALETTE):
         r, g, b = p["rgb"]
-        sw_cols[i % 5].markdown(
+        cols[i].markdown(
             f"""
-            <div style="border:1px solid #ddd;border-radius:12px;padding:10px;margin-bottom:10px;">
-              <div style="height:28px;border-radius:9px;background:rgb({r},{g},{b});border:1px solid #eee;"></div>
-              <div style="font-size:12px;margin-top:8px;">{p['name']}</div>
+            <div style="border:1px solid #ddd;border-radius:14px;padding:12px;">
+              <div style="height:32px;border-radius:10px;
+                   background:rgb({r},{g},{b});
+                   border:1px solid #eee;"></div>
+              <div style="font-size:13px;margin-top:8px;text-align:center;">
+                {p['name']}
+              </div>
             </div>
             """,
             unsafe_allow_html=True
@@ -180,64 +188,64 @@ elif up is not None:
     img = Image.open(up)
 
 if img is None:
-    st.info("Take a photo or upload one to get a match.")
+    st.info("Take or upload a photo to identify the colour.")
     st.stop()
-
-# Apply optional crop
-if crop_w > 0 and crop_h > 0:
-    W, H = img.size
-    x1 = min(max(0, int(crop_x)), W)
-    y1 = min(max(0, int(crop_y)), H)
-    x2 = min(W, int(crop_x + crop_w))
-    y2 = min(H, int(crop_y + crop_h))
-    if x2 > x1 and y2 > y1:
-        img = img.crop((x1, y1, x2, y2))
 
 pixels, preview = prep_pixels(img, ignore_glare=ignore_glare)
 
 if len(pixels) < 200:
-    st.warning("Not enough usable pixels (photo may be too dark/bright). Try another photo or turn off glare filtering.")
+    st.warning("Photo too dark/bright to analyse reliably. Try another photo.")
     st.stop()
 
-dom_rgb, dom_share = kmeans_dominant_rgb(pixels, k=3)
+dom_rgb, dom_share = kmeans_dominant_rgb(pixels)
 dom_rgb = clamp_rgb(dom_rgb)
 
 best, top = match_palette(dom_rgb)
 conf = confidence_label(best["score"])
 
-c_left, c_right = st.columns([1.1, 1])
+c1, c2 = st.columns([1.1, 1])
 
-with c_left:
+with c1:
     st.subheader("Photo preview")
     st.image(preview, use_container_width=True)
 
-with c_right:
+with c2:
     st.subheader("Result")
     st.markdown(
-        f"**Closest match:** {best['name']}  \n"
-        f"**Confidence:** {conf}  \n"
-        f"**Dominant share:** {dom_share:.0%}"
+        f"""
+        **Closest match:** {best['name']}  
+        **Confidence:** {conf}  
+        **Dominant colour share:** {dom_share:.0%}
+        """
     )
 
     r, g, b = dom_rgb
     st.markdown(
         f"""
-        <div style="display:flex;gap:12px;align-items:center;margin-top:12px;">
-          <div style="width:56px;height:56px;border-radius:14px;border:1px solid #ddd;background:rgb({r},{g},{b});"></div>
-          <div style="font-size:12px;color:#666;">Estimated dominant colour</div>
+        <div style="display:flex;gap:14px;align-items:center;margin-top:14px;">
+          <div style="width:60px;height:60px;border-radius:16px;
+               border:1px solid #ddd;
+               background:rgb({r},{g},{b});"></div>
+          <div style="font-size:12px;color:#666;">
+            Estimated dominant colour
+          </div>
         </div>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_html=True
     )
 
-    st.markdown("#### Top matches")
-    for i, t in enumerate(top[:3], start=1):
+    st.markdown("#### Match ranking")
+    for i, t in enumerate(top, start=1):
         rr, gg, bb = t["rgb"]
         st.markdown(
             f"{i}) **{t['name']}** — score {t['score']:.2f} "
-            f"<span style='display:inline-block;width:14px;height:14px;border-radius:4px;"
-            f"border:1px solid #ddd;background:rgb({rr},{gg},{bb});'></span>",
-            unsafe_allow_html=True,
+            f"<span style='display:inline-block;width:14px;height:14px;"
+            f"border-radius:4px;border:1px solid #ddd;"
+            f"background:rgb({rr},{gg},{bb});'></span>",
+            unsafe_allow_html=True
         )
 
-    st.caption("Best results: close-up, daylight, minimal background, avoid glare from plastic wrap.")
+    st.caption(
+        "Tip: Best results come from a close-up photo in daylight, "
+        "with minimal background and little reflection from packaging."
+    )

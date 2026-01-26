@@ -10,7 +10,7 @@ st.caption("Quick screen recordings for installers and drivers.")
 # --------------------------------------------------
 VIDEOS = {
     "Field Aware – mobile walkthrough": "1-74Pi2gtH1cwTGhF60XV6VZJnKOGvHHy",
-    "Field Aware – completing job & sign-off": "1RT1MvKBewo4i0kzfoz0XPcNSqQKZ773O",
+    "Field Aware – declining a job & failure reasons": "1RT1MvKBewo4i0kzfoz0XPcNSqQKZ773O",
 }
 
 def drive_view_url(file_id: str) -> str:
@@ -40,5 +40,5 @@ st.link_button(
 st.divider()
 
 st.caption(
-    "Tip: These videos open in Google Drive for reliability on site and low signal."
+    "Tip: These videos open in Google Drive for reliable playback on site."
 )

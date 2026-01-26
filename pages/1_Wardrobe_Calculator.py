@@ -35,9 +35,10 @@ st.header("Wardrobe Door & Liner Calculator")
 # CONSTANTS
 # ============================================================
 BOTTOM_LINER_THICKNESS = 36
-TRACKSET_HEIGHT = 54
-BASE_SIDE_LINER_THICKNESS = 18
+TRACKSET_HEIGHT = 54  # keep visible for ALL clients
+FIXED_SIZED_DOOR_HEIGHT = 2313  # keep visible for ALL clients
 
+BASE_SIDE_LINER_THICKNESS = 18
 MAX_DOOR_HEIGHT = 2500
 MAX_DROPDOWN_LIMIT = 400
 
@@ -45,7 +46,7 @@ HOUSEBUILDER_RULES = {
     "Non-client specific wardrobe": {"dropdown": 0, "locked_total_per_side": None},
     "Avant": {"dropdown": 90, "locked_total_per_side": None},
     "Homes By Honey": {"dropdown": 90, "locked_total_per_side": None},
-    "Bloor": {"dropdown": 108, "locked_total_per_side": None},  # guidance-only
+    "Bloor": {"dropdown": 108, "locked_total_per_side": None},  # floorplan-only
     "Story": {"dropdown": 50, "locked_total_per_side": 68},
     "Strata": {"dropdown": 50, "locked_total_per_side": 68},
     "Jones Homes": {"dropdown": 50, "locked_total_per_side": 68},
@@ -62,7 +63,8 @@ DOOR_STYLE_OPTIONS = list(DOOR_STYLE_OVERLAP.keys())
 
 DROPDOWN_SELECT_OPTIONS = ["Auto", "0", "18", "50", "90", "108"]
 
-FLOORPLAN_ONLY_HOUSEBUILDERS = {"Avant", "Homes By Honey"}  # no calculated outputs shown
+# Hide calculated door sizes for these clients (must use Field Aware floor plan)
+FLOORPLAN_ONLY_HOUSEBUILDERS = {"Avant", "Homes By Honey", "Bloor"}
 
 
 # ============================================================
@@ -151,7 +153,7 @@ def draw_wardrobe_diagram(
     if dropdown_rel:
         ax.add_patch(Rectangle((left_rel, 1 - dropdown_rel), 1 - left_rel - right_rel, dropdown_rel, alpha=0.15))
 
-    # doors (dashed)
+    # doors (dashed) - keep but no dimensions
     num_doors = max(int(num_doors), 1)
     span = max(1 - left_rel - right_rel, 0)
 
@@ -237,7 +239,7 @@ if pd.isna(row_in.get("Width_mm")) or pd.isna(row_in.get("Height_mm")):
     st.stop()
 
 # ============================================================
-# CALCULATION
+# CALCULATION (still computed for CSV/table, but display is blocked for floorplan-only)
 # ============================================================
 def calculate(row: pd.Series) -> pd.Series:
     warnings: list[str] = []
@@ -255,7 +257,7 @@ def calculate(row: pd.Series) -> pd.Series:
     end_panels = int(row.get("End_Panels", 0) or 0)
     door_style = row.get("Door_Style", "Classic")
 
-    # Dropdown: user choice + validation
+    # Dropdown selection + check
     is_auto, user_dd = parse_dropdown_select(row.get("Dropdown_Select", "Auto"))
     dropdown_type_status = "OK"
     if not is_auto and user_dd != hb_required_dropdown:
@@ -273,7 +275,7 @@ def calculate(row: pd.Series) -> pd.Series:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
 
-    # End panels simplified view (always 18/18 each side)
+    # End panels simplified view
     if end_panels >= 1:
         left_total = right_total = 18.0
         left_t = right_t = 0.0
@@ -285,7 +287,8 @@ def calculate(row: pd.Series) -> pd.Series:
     overlap_per_meeting = int(DOOR_STYLE_OVERLAP.get(door_style, 25))
     total_overlap = overlaps_count(doors) * overlap_per_meeting
 
-    height_stack = BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT  # 36 + 54
+    # Height deductions: 36 bottom liner + 54 trackset + dropdown selection
+    height_stack = BOTTOM_LINER_THICKNESS + TRACKSET_HEIGHT
     raw_door_h = height - height_stack - dropdown_h
     door_h = max(min(raw_door_h, MAX_DOOR_HEIGHT), 0)
     if door_h <= 0:
@@ -343,27 +346,29 @@ csv = results.to_csv(index=False).encode("utf-8")
 st.download_button("Download CSV", csv, "wardrobe_results.csv", "text/csv")
 
 # ============================================================
-# 3. VISUALISE OPENING + BANNERS
+# 3. VISUALISE OPENING + BANNERS (DISPLAY BLOCK FOR FLOORPLAN CLIENTS)
 # ============================================================
 st.subheader("3. Visualise opening")
 
 row = results.iloc[0]
 hb = row["Housebuilder"]
+floorplan_only = hb in FLOORPLAN_ONLY_HOUSEBUILDERS
 
-# Bloor banner
+# Always-visible note (all clients)
+st.info(f"Trackset height: **{TRACKSET_HEIGHT}mm** | Fixed sized door height: **{FIXED_SIZED_DOOR_HEIGHT}mm**")
+
 if hb == "Bloor":
     st.markdown(
         """
 **Bloor specification – follow Field Aware floor plan**
 
-This job is **Bloor**. The final opening width/height and any build-out needed must be taken from the
-**client floor plan in Field Aware** to make the wardrobe product work with the aperture.
+This job is **Bloor**. The final opening sizes, build-out and fitting approach must be taken from the
+**client floor plan in Field Aware**.
 
-- Check the **Field Aware floor plan** for sizes and how to fit.
+- **Installer to check Field Aware floor plan** for sizes and how to fit.
 """
     )
 
-# Avant / Homes By Honey banner
 if hb in {"Avant", "Homes By Honey"}:
     st.markdown(
         """
@@ -378,9 +383,7 @@ The final sizes, build-out, and fitting approach must be taken from the **client
 """
     )
 
-# If floorplan-only client: DO NOT show calculated warnings/results that could conflict
-floorplan_only = hb in FLOORPLAN_ONLY_HOUSEBUILDERS
-
+# Only show on-screen calculation warnings/errors for non-floorplan clients
 if not floorplan_only:
     errs = str(row.get("Errors", "")).strip()
     warns = str(row.get("Warnings", "")).strip()
@@ -402,8 +405,7 @@ dropdown = int(row.get("Dropdown_Height_mm", 0))
 left_total = float(row.get("Side_Left_Total_mm", 18))
 right_total = float(row.get("Side_Right_Total_mm", 18))
 
-# For floorplan-only clients, keep the diagram honest/neutral:
-# show 18mm side liners (36mm total) as generic context shading (not implying their true build-out)
+# Keep diagram neutral for floorplan-only clients
 diagram_left = 18.0 if floorplan_only else left_total
 diagram_right = 18.0 if floorplan_only else right_total
 
@@ -442,5 +444,5 @@ with col2:
         st.write(f"**Total overlap:** {row.get('Total_Overlap_mm','—')} mm")
 
     st.caption(
-        f"Height deductions: bottom liner ({BOTTOM_LINER_THICKNESS}mm) + trackset tolerance ({TRACKSET_HEIGHT}mm) + dropdown."
+        f"Height deductions: bottom liner ({BOTTOM_LINER_THICKNESS}mm) + trackset ({TRACKSET_HEIGHT}mm) + dropdown."
     )

@@ -112,7 +112,7 @@ def side_desc(left_total, right_total, left_t, right_t, end_panels: int) -> str:
 
 
 # ============================================================
-# DIAGRAM (minimal annotations only: opening W/H + dropdown)
+# DIAGRAM (minimal dims + FIXING NOTES)
 # ============================================================
 def draw_wardrobe_diagram(
     opening_width_mm,
@@ -143,9 +143,10 @@ def draw_wardrobe_diagram(
     ax.axis("off")
     ax.set_aspect("equal")
 
+    # Opening outline
     ax.add_patch(Rectangle((0, 0), 1, 1, fill=False, lw=2))
 
-    # context shading only
+    # Context shading only
     ax.add_patch(Rectangle((0, bottom_rel), left_rel, 1 - bottom_rel, alpha=0.15))
     ax.add_patch(Rectangle((1 - right_rel, bottom_rel), right_rel, 1 - bottom_rel, alpha=0.15))
     ax.add_patch(Rectangle((left_rel, 0), 1 - left_rel - right_rel, bottom_rel, alpha=0.15))
@@ -153,12 +154,16 @@ def draw_wardrobe_diagram(
     if dropdown_rel:
         ax.add_patch(Rectangle((left_rel, 1 - dropdown_rel), 1 - left_rel - right_rel, dropdown_rel, alpha=0.15))
 
-    # doors (dashed) - keep but no dimensions
+    # -----------------------------
+    # DOORS (dashed)
+    # -----------------------------
     num_doors = max(int(num_doors), 1)
     span = max(1 - left_rel - right_rel, 0)
 
-    if door_width_mm and float(door_width_mm) > 0:
-        door_w_rel = float(door_width_mm) / ow
+    # Visual door width scaling (avoid extending beyond opening)
+    door_width_mm = max(float(door_width_mm or 0), 0.0)
+    if door_width_mm > 0:
+        door_w_rel = door_width_mm / ow
         total = num_doors * door_w_rel
         if total > span and total > 0:
             door_w_rel *= (span / total)
@@ -170,7 +175,9 @@ def draw_wardrobe_diagram(
         ax.add_patch(Rectangle((x, bottom_rel), door_w_rel, door_h_rel, fill=False, linestyle="--", lw=1.2))
         x += door_w_rel
 
-    # minimal dimensions
+    # ============================================================
+    # MINIMAL DIMENSIONS ONLY
+    # ============================================================
     def dim_h(x0, x1, y, text):
         ax.annotate("", xy=(x0, y), xytext=(x1, y), arrowprops=dict(arrowstyle="<->", lw=1.4))
         ax.text((x0 + x1) / 2, y + 0.02, text, ha="center", va="bottom", fontsize=9)
@@ -184,6 +191,67 @@ def draw_wardrobe_diagram(
 
     if dropdown_rel > 0:
         dim_v(1.08, 1 - dropdown_rel, 1, f"Dropdown: {int(round(dropdown_height_mm))}mm")
+
+    # ============================================================
+    # FIXING NOTES (as requested)
+    # ============================================================
+    note_box = dict(boxstyle="round,pad=0.45", fc="white", ec="black", lw=1)
+
+    # TOP LINER / DROP-DOWN FIXING NOTE (with arrow) - only if dropdown exists
+    if dropdown_rel > 0:
+        ax.annotate(
+            "Drop-down to be fixed using\n"
+            "metal stretcher brackets.\n"
+            "2x into side liners and\n"
+            "brackets every 600mm.",
+            xy=(0.5, 1 - dropdown_rel / 2),
+            xytext=(1.28, 1 - dropdown_rel / 2),
+            fontsize=8,
+            ha="left",
+            va="center",
+            bbox=note_box,
+            arrowprops=dict(arrowstyle="->", lw=1.3),
+        )
+
+    # SIDE LINER FIXING NOTE (LEFT) – NO ARROW
+    ax.annotate(
+        "Side liners fixings -\n"
+        "200mm in from either end\n"
+        "and then two in the middle\n"
+        "of the liner (equally spaced),\n"
+        "so 4x fixings in total.",
+        xy=(max(left_rel, 0.02) / 2, 0.5),
+        xytext=(-0.34, 0.72),
+        fontsize=8,
+        ha="right",
+        va="center",
+        bbox=note_box,
+    )
+
+    # BOTTOM LINER / SUB-CILL FIXING NOTE – NO ARROW
+    ax.annotate(
+        "Sub-cill to floor - fixing every 500mm\n"
+        "Sub-cill to carpet - fixing every 200mm",
+        xy=(0.5, bottom_rel / 2 if bottom_rel > 0 else 0.02),
+        xytext=(0.5, -0.20),
+        fontsize=8,
+        ha="center",
+        va="top",
+        bbox=note_box,
+    )
+
+    # BOTTOM TRACK FIXING NOTE (with arrow)
+    ax.annotate(
+        "Bottom track fixing - 50-80mm in from ends\n"
+        "and then every 800mm of track span.",
+        xy=(0.5, min(bottom_rel + 0.02, 0.08)),
+        xytext=(1.28, min(bottom_rel + 0.18, 0.30)),
+        fontsize=8,
+        ha="left",
+        va="center",
+        bbox=note_box,
+        arrowprops=dict(arrowstyle="->", lw=1.3),
+    )
 
     return fig
 
@@ -409,6 +477,10 @@ right_total = float(row.get("Side_Right_Total_mm", 18))
 diagram_left = 18.0 if floorplan_only else left_total
 diagram_right = 18.0 if floorplan_only else right_total
 
+# For floorplan-only clients: keep door dims neutral, but still draw dashed doors for context
+door_h_for_diagram = 0 if floorplan_only else row.get("Door_Height_mm", 0)
+door_w_for_diagram = 0 if floorplan_only else row.get("Door_Width_mm", 0)
+
 fig = draw_wardrobe_diagram(
     opening_width_mm=row["Width_mm"],
     opening_height_mm=row["Height_mm"],
@@ -416,9 +488,9 @@ fig = draw_wardrobe_diagram(
     side_left_mm=diagram_left,
     side_right_mm=diagram_right,
     dropdown_height_mm=dropdown,
-    door_height_mm=0 if floorplan_only else row.get("Door_Height_mm", 0),
+    door_height_mm=door_h_for_diagram,
     num_doors=doors_used,
-    door_width_mm=0 if floorplan_only else row.get("Door_Width_mm", 0),
+    door_width_mm=door_w_for_diagram,
 )
 
 col1, col2 = st.columns([2, 1])

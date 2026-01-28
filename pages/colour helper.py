@@ -1,6 +1,11 @@
 import streamlit as st
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFile
+import requests
+from io import BytesIO
+
+# Avoid errors on slightly truncated uploads
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ============================================================
 # PAGE CONFIG
@@ -14,10 +19,55 @@ st.caption(
 )
 
 # ============================================================
+# GOOGLE DRIVE IMAGE LOADER
+# ============================================================
+def _extract_gdrive_file_id(url: str) -> str | None:
+    # Supports URLs like:
+    # https://drive.google.com/file/d/<FILE_ID>/view?...
+    try:
+        if "/file/d/" in url:
+            return url.split("/file/d/")[1].split("/")[0]
+        if "id=" in url:
+            return url.split("id=")[1].split("&")[0]
+    except Exception:
+        return None
+    return None
+
+def _download_gdrive_file(file_id: str) -> bytes:
+    """
+    Robust download for Drive 'Anyone with link' files.
+    Handles the occasional confirmation token flow.
+    """
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+    url = "https://drive.google.com/uc?export=download"
+    r = session.get(url, params={"id": file_id}, stream=True, timeout=30)
+
+    # If Drive returns an interstitial HTML, try confirm token in cookies
+    if "text/html" in (r.headers.get("Content-Type") or ""):
+        confirm = None
+        for k, v in r.cookies.items():
+            if k.startswith("download_warning"):
+                confirm = v
+                break
+        if confirm:
+            r = session.get(url, params={"id": file_id, "confirm": confirm}, stream=True, timeout=30)
+
+    r.raise_for_status()
+    return r.content
+
+@st.cache_data(show_spinner=False)
+def load_reference_image_from_gdrive(file_id: str) -> Image.Image:
+    data = _download_gdrive_file(file_id)
+    return Image.open(BytesIO(data)).convert("RGB")
+
+# Your provided link:
+GDRIVE_REFERENCE_LINK = "https://drive.google.com/file/d/19kaalmmDyIg9ijum5gZYqeEuWrpnoK4N/view?usp=drivesdk"
+GDRIVE_FILE_ID = _extract_gdrive_file_id(GDRIVE_REFERENCE_LINK) or "19kaalmmDyIg9ijum5gZYqeEuWrpnoK4N"
+
+# ============================================================
 # COLOUR PALETTE (YOUR INTERNAL NAMES + RGB)
-#  - Proper Case
-#  - Indigo updated
-#  - Order preserved exactly as defined
 # ============================================================
 PALETTE = [
     {"name": "Graphite & Onyx",   "rgb": (106, 106, 108)},
@@ -38,7 +88,7 @@ PALETTE = [
 ]
 
 # ============================================================
-# COLOUR SPACE HELPERS (RGB -> Lab)
+# COLOUR SPACE HELPERS (RGB -> Lab for perceptual matching)
 # ============================================================
 def _srgb_to_linear(c):
     c = c / 255.0
@@ -72,7 +122,7 @@ def rgb_to_lab(rgb):
 def rgb_to_hex(rgb):
     return "#{:02X}{:02X}{:02X}".format(*rgb)
 
-# Precompute Lab + Hex (NO sorting)
+# Precompute palette in Lab space + Hex
 for p in PALETTE:
     p["lab"] = rgb_to_lab(p["rgb"])
     p["hex"] = rgb_to_hex(p["rgb"])
@@ -158,43 +208,44 @@ def confidence_label(score):
     return "Low"
 
 # ============================================================
-# UI
+# UI (Left: upload, Right: labelled reference image from Drive)
 # ============================================================
 left, right = st.columns([1.15, 1])
 
 with left:
     st.subheader("1) Take / upload photo")
 
-    cam = st.camera_input("Use camera (mobile)")
-    up = st.file_uploader("Or upload a photo", type=["jpg", "jpeg", "png", "webp"])
+    cam = st.camera_input(
+        "Use camera (mobile)",
+        help="Take a close-up of the product surface. Avoid glare if possible."
+    )
+    up = st.file_uploader(
+        "Or upload a photo",
+        type=["jpg", "jpeg", "png", "webp"]
+    )
 
-    ignore_glare = st.toggle("Ignore bright reflections (recommended)", value=True)
+    ignore_glare = st.toggle(
+        "Ignore bright reflections (recommended)",
+        value=True
+    )
 
 with right:
     st.subheader("Colour reference")
-    cols = st.columns(len(PALETTE))
-    for i, p in enumerate(PALETTE):
-        r, g, b = p["rgb"]
-        cols[i].markdown(
-            f"""
-            <div style="border:1px solid #ddd;border-radius:14px;padding:12px;">
-              <div style="height:32px;border-radius:10px;
-                   background:rgb({r},{g},{b});
-                   border:1px solid #eee;"></div>
-              <div style="font-size:13px;margin-top:8px;text-align:center;">
-                {p['name']}
-              </div>
-              <div style="font-size:12px;margin-top:4px;text-align:center;color:#666;">
-                {p['hex']}
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+
+    try:
+        ref_img = load_reference_image_from_gdrive(GDRIVE_FILE_ID)
+        st.image(ref_img, use_container_width=True, caption="Internal colour reference chart")
+    except Exception:
+        st.warning(
+            "Could not load the reference image from Google Drive. "
+            "Make sure the file is shared as 'Anyone with the link can view'."
         )
 
 st.divider()
 
+# ============================================================
 # Pick image source
+# ============================================================
 img = None
 if cam is not None:
     img = Image.open(cam)
@@ -241,7 +292,7 @@ with c2:
           <div style="width:60px;height:60px;border-radius:16px;
                border:1px solid #ddd;
                background:rgb({r},{g},{b});"></div>
-          <div style="font-size:12px;color:#666;">
+          <div style="font-size:12px;color:#666;line-height:1.4;">
             Estimated dominant colour<br/>
             <strong>{dom_hex}</strong>
           </div>

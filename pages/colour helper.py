@@ -16,8 +16,8 @@ st.caption(
 # ============================================================
 # COLOUR PALETTE (YOUR INTERNAL NAMES + RGB)
 #  - Proper Case
-#  - Indigo updated to (46, 50, 62)
-#  - Will be sorted Dark -> Light automatically (perceptual Lab L*)
+#  - Indigo updated
+#  - Order preserved exactly as defined
 # ============================================================
 PALETTE = [
     {"name": "Graphite & Onyx",   "rgb": (106, 106, 108)},
@@ -38,7 +38,7 @@ PALETTE = [
 ]
 
 # ============================================================
-# COLOUR SPACE HELPERS (RGB -> Lab for perceptual matching)
+# COLOUR SPACE HELPERS (RGB -> Lab)
 # ============================================================
 def _srgb_to_linear(c):
     c = c / 255.0
@@ -72,12 +72,10 @@ def rgb_to_lab(rgb):
 def rgb_to_hex(rgb):
     return "#{:02X}{:02X}{:02X}".format(*rgb)
 
-# Precompute palette in Lab space + Hex, then sort dark -> light by Lab L*
+# Precompute Lab + Hex (NO sorting)
 for p in PALETTE:
     p["lab"] = rgb_to_lab(p["rgb"])
     p["hex"] = rgb_to_hex(p["rgb"])
-
-PALETTE.sort(key=lambda p: float(p["lab"][0]))  # low L* (dark) -> high L* (light)
 
 # ============================================================
 # DOMINANT COLOUR EXTRACTION (k-means)
@@ -167,22 +165,13 @@ left, right = st.columns([1.15, 1])
 with left:
     st.subheader("1) Take / upload photo")
 
-    cam = st.camera_input(
-        "Use camera (mobile)",
-        help="Take a close-up of the product surface. Avoid glare if possible."
-    )
-    up = st.file_uploader(
-        "Or upload a photo",
-        type=["jpg", "jpeg", "png", "webp"]
-    )
+    cam = st.camera_input("Use camera (mobile)")
+    up = st.file_uploader("Or upload a photo", type=["jpg", "jpeg", "png", "webp"])
 
-    ignore_glare = st.toggle(
-        "Ignore bright reflections (recommended)",
-        value=True
-    )
+    ignore_glare = st.toggle("Ignore bright reflections (recommended)", value=True)
 
 with right:
-    st.subheader("Colour reference (Dark → Light)")
+    st.subheader("Colour reference")
     cols = st.columns(len(PALETTE))
     for i, p in enumerate(PALETTE):
         r, g, b = p["rgb"]
@@ -252,7 +241,7 @@ with c2:
           <div style="width:60px;height:60px;border-radius:16px;
                border:1px solid #ddd;
                background:rgb({r},{g},{b});"></div>
-          <div style="font-size:12px;color:#666;line-height:1.4;">
+          <div style="font-size:12px;color:#666;">
             Estimated dominant colour<br/>
             <strong>{dom_hex}</strong>
           </div>

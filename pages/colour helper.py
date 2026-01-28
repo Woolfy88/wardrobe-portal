@@ -15,10 +15,26 @@ st.caption(
 
 # ============================================================
 # COLOUR PALETTE (YOUR INTERNAL NAMES + RGB)
+#  - Proper Case
+#  - Indigo updated to (46, 50, 62)
+#  - Will be sorted Dark -> Light automatically (perceptual Lab L*)
 # ============================================================
 PALETTE = [
-    {"name": "Onyx",        "rgb": (78, 84, 82)},
-    {"name": "Pebble Grey", "rgb": (156, 156, 156)},
+    {"name": "Graphite & Onyx",   "rgb": (106, 106, 108)},
+    {"name": "Pebble",            "rgb": (182, 173, 158)},
+    {"name": "Cashmere",          "rgb": (225, 220, 217)},
+    {"name": "Dove Grey",         "rgb": (226, 224, 225)},
+    {"name": "White",             "rgb": (255, 255, 255)},
+    {"name": "Cabrini Walnut",    "rgb": (88, 69, 55)},
+    {"name": "Davos Oak",         "rgb": (130, 117, 105)},
+    {"name": "Nebraska Oak",      "rgb": (135, 108, 90)},
+    {"name": "Lancaster Oak",     "rgb": (188, 142, 90)},
+    {"name": "Sand Orleans Oak",  "rgb": (160, 140, 118)},
+    {"name": "Soft Black",        "rgb": (58, 55, 52)},
+    {"name": "Indigo",            "rgb": (46, 50, 62)},
+    {"name": "Reed Green",        "rgb": (126, 139, 131)},
+    {"name": "Taupe",             "rgb": (210, 201, 186)},
+    {"name": "Ritmonio Oak",      "rgb": (173, 159, 140)},
 ]
 
 # ============================================================
@@ -53,9 +69,15 @@ def xyz_to_lab(xyz):
 def rgb_to_lab(rgb):
     return xyz_to_lab(rgb_to_xyz(rgb))
 
-# Precompute palette in Lab space
+def rgb_to_hex(rgb):
+    return "#{:02X}{:02X}{:02X}".format(*rgb)
+
+# Precompute palette in Lab space + Hex, then sort dark -> light by Lab L*
 for p in PALETTE:
     p["lab"] = rgb_to_lab(p["rgb"])
+    p["hex"] = rgb_to_hex(p["rgb"])
+
+PALETTE.sort(key=lambda p: float(p["lab"][0]))  # low L* (dark) -> high L* (light)
 
 # ============================================================
 # DOMINANT COLOUR EXTRACTION (k-means)
@@ -116,16 +138,16 @@ def match_palette(dominant_rgb):
     rows = []
     for p in PALETTE:
         dist = float(np.linalg.norm(dom_lab - p["lab"]))
-        rows.append((p["name"], p["rgb"], dist))
+        rows.append((p["name"], p["rgb"], p["hex"], dist))
 
-    rows.sort(key=lambda x: x[2])
+    rows.sort(key=lambda x: x[3])
 
     def dist_to_score(d):
         return float(np.clip(1.0 - (d / 35.0), 0.0, 1.0))
 
     top = [
-        {"name": n, "rgb": rgb, "dist": d, "score": dist_to_score(d)}
-        for n, rgb, d in rows[:5]
+        {"name": n, "rgb": rgb, "hex": hx, "dist": d, "score": dist_to_score(d)}
+        for n, rgb, hx, d in rows[:5]
     ]
 
     return top[0], top
@@ -160,7 +182,7 @@ with left:
     )
 
 with right:
-    st.subheader("Colour reference")
+    st.subheader("Colour reference (Dark → Light)")
     cols = st.columns(len(PALETTE))
     for i, p in enumerate(PALETTE):
         r, g, b = p["rgb"]
@@ -172,6 +194,9 @@ with right:
                    border:1px solid #eee;"></div>
               <div style="font-size:13px;margin-top:8px;text-align:center;">
                 {p['name']}
+              </div>
+              <div style="font-size:12px;margin-top:4px;text-align:center;color:#666;">
+                {p['hex']}
               </div>
             </div>
             """,
@@ -199,6 +224,7 @@ if len(pixels) < 200:
 
 dom_rgb, dom_share = kmeans_dominant_rgb(pixels)
 dom_rgb = clamp_rgb(dom_rgb)
+dom_hex = rgb_to_hex(dom_rgb)
 
 best, top = match_palette(dom_rgb)
 conf = confidence_label(best["score"])
@@ -226,8 +252,9 @@ with c2:
           <div style="width:60px;height:60px;border-radius:16px;
                border:1px solid #ddd;
                background:rgb({r},{g},{b});"></div>
-          <div style="font-size:12px;color:#666;">
-            Estimated dominant colour
+          <div style="font-size:12px;color:#666;line-height:1.4;">
+            Estimated dominant colour<br/>
+            <strong>{dom_hex}</strong>
           </div>
         </div>
         """,
@@ -238,7 +265,7 @@ with c2:
     for i, t in enumerate(top, start=1):
         rr, gg, bb = t["rgb"]
         st.markdown(
-            f"{i}) **{t['name']}** — score {t['score']:.2f} "
+            f"{i}) **{t['name']}** — score {t['score']:.2f} — {t['hex']} "
             f"<span style='display:inline-block;width:14px;height:14px;"
             f"border-radius:4px;border:1px solid #ddd;"
             f"background:rgb({rr},{gg},{bb});'></span>",
